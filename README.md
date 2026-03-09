@@ -2,7 +2,29 @@
 
 MCP server for multi-agent task delegation and orchestration via [Gemini CLI](https://github.com/google-gemini/gemini-cli).
 
-Built on [Model Context Protocol](https://modelcontextprotocol.io/) — connects AI coding assistants to Gemini CLI agents for parallel work.
+Built on [Model Context Protocol](https://modelcontextprotocol.io/) — turns your single Gemini subscription into a parallel agent workforce.
+
+## How It Works
+
+Your AI coding assistant (Antigravity, Cursor, Windsurf, or any MCP-compatible IDE) acts as the **primary agent**. Agent-pool lets it spawn **parallel Gemini CLI workers** that share your existing Gemini authentication — no extra API keys or subscriptions needed.
+
+```
+┌─────────────────────────────────┐
+│  Primary IDE Agent              │  ← Your coding assistant
+│  (Antigravity / Cursor / ...)   │
+└────────────┬────────────────────┘
+             │ MCP (stdio)
+┌────────────▼────────────────────┐
+│  agent-pool-mcp                 │  ← This server
+│  (tool router + process mgmt)  │
+└──┬─────────┬─────────┬─────────┘
+   │         │         │
+   ▼         ▼         ▼
+  gemini    gemini    gemini       ← Gemini CLI workers
+  (task1)   (task2)   (review)       (same auth, parallel)
+```
+
+The primary agent focuses on interactive work (UI, browser, user communication), while Gemini CLI agents handle background tasks: code analysis, testing, research, refactoring — all running in parallel.
 
 ## Features
 
@@ -50,21 +72,42 @@ npm install
 
 ## Usage
 
-### With Antigravity IDE
+Add agent-pool to your IDE's MCP configuration. All spawned workers reuse your existing `gemini` CLI authentication — the same account you already use for Gemini CLI.
 
-Add to `~/.gemini/antigravity/mcp_config.json`:
+### Antigravity IDE
+
+`~/.gemini/antigravity/mcp_config.json`:
 
 ```json
 {
   "mcpServers": {
     "agent-pool": {
       "command": "node",
-      "args": ["/path/to/agent-pool-mcp/index.js"],
-      "env": {},
-      "disabled": false
+      "args": ["/path/to/agent-pool-mcp/index.js"]
     }
   }
 }
+```
+
+### Cursor / Windsurf
+
+`.cursor/mcp.json` or equivalent:
+
+```json
+{
+  "mcpServers": {
+    "agent-pool": {
+      "command": "node",
+      "args": ["/path/to/agent-pool-mcp/index.js"]
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude mcp add agent-pool node /path/to/agent-pool-mcp/index.js
 ```
 
 ### Standalone
