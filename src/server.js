@@ -99,7 +99,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     runner: args.runner,
   };
 
-  createTask(taskId, args.prompt);
+  createTask(taskId, args.prompt, args.on_wait_hint);
 
   runGeminiStreaming(taskOpts)
     .then((result) => completeTask(taskId, result))
