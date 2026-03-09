@@ -1,22 +1,28 @@
 # agent-pool-mcp
 
-MCP server for multi-agent task delegation and orchestration via [Gemini CLI](https://github.com/google-gemini/gemini-cli).
+**MCP server for multi-agent orchestration** — parallel task delegation and cross-model peer review via [Gemini CLI](https://github.com/google-gemini/gemini-cli).
 
-Built on [Model Context Protocol](https://modelcontextprotocol.io/) — turns your single Gemini subscription into a parallel agent workforce.
+> Developed by [RND-PRO](https://rnd-pro.com)
+
+Compatible with [Antigravity](https://antigravity.dev), Cursor, Windsurf, Claude Code, and any MCP-enabled coding agent.
+
+## Why?
+
+AI coding assistants are powerful, but they work **sequentially** — one task at a time. Agent-pool turns your single Gemini subscription into a **parallel agent workforce**: your primary IDE agent delegates background tasks to Gemini CLI workers, all sharing the same authentication.
+
+When the primary agent and Gemini workers are **different foundation models** (e.g. Claude + Gemini), `consult_peer` becomes a **cross-model reasoning amplifier** — two independent architectures reviewing each other eliminate systematic blind spots that plague single-model workflows.
 
 ## How It Works
 
-Your AI coding assistant (Antigravity, Cursor, Windsurf, or any MCP-compatible IDE) acts as the **primary agent**. Agent-pool lets it spawn **parallel Gemini CLI workers** that share your existing Gemini authentication — no extra API keys or subscriptions needed.
-
 ```
 ┌─────────────────────────────────┐
-│  Primary IDE Agent              │  ← Your coding assistant
+│  Primary IDE Agent              │  ← Claude, GPT, Gemini, etc.
 │  (Antigravity / Cursor / ...)   │
 └────────────┬────────────────────┘
              │ MCP (stdio)
 ┌────────────▼────────────────────┐
 │  agent-pool-mcp                 │  ← This server
-│  (tool router + process mgmt)  │
+│  (task router + process mgmt)  │
 └──┬─────────┬─────────┬─────────┘
    │         │         │
    ▼         ▼         ▼
@@ -24,142 +30,62 @@ Your AI coding assistant (Antigravity, Cursor, Windsurf, or any MCP-compatible I
   (task1)   (task2)   (review)       (same auth, parallel)
 ```
 
-The primary agent focuses on interactive work (UI, browser, user communication), while Gemini CLI agents handle background tasks: code analysis, testing, research, refactoring — all running in parallel.
-
-## Cross-Model Peer Review
-
-The most powerful pattern emerges when your primary IDE agent and Gemini CLI workers are **different foundation models** — for example, Claude (Antigravity/Cursor) + Gemini (CLI workers).
-
-When you call `consult_peer`, you get **cross-model architectural consensus**:
-
-```
-┌──────────────────┐        consult_peer        ┌──────────────────┐
-│  Claude Opus 4   │ ────── proposal ──────────▶ │  Gemini Pro      │
-│  (primary agent) │ ◀───── verdict ─────────── │  (peer reviewer) │
-│                  │                             │                  │
-│  Strengths:      │                             │  Strengths:      │
-│  · Deep reasoning│                             │  · Codebase scan │
-│  · Nuanced code  │                             │  · Broad context │
-│  · UI/UX sense   │                             │  · Pattern match │
-└──────────────────┘                             └──────────────────┘
-                         ↓
-               Cross-model consensus
-          (blind spots cancel each other out)
-```
-
-**Why this matters:**
-
-- A single model reviewing its own plan has **systematic blind spots** — it tends to agree with itself
-- Two different models trained on different data with different architectures catch **complementary issues**
-- The structured verdict protocol (AGREE / SUGGEST_CHANGES / DISAGREE) forces explicit reasoning
-- Iterative rounds let you refine until both models agree — the final result is stronger than either alone
-
-```javascript
-// Claude proposes → Gemini reviews → iterate until AGREE
-const verdict = await consult_peer({
-  context: 'Extracting auth module from monolith',
-  proposal: 'JWT + refresh tokens, middleware pattern...',
-});
-// verdict: SUGGEST_CHANGES → revise → re-consult
-// verdict: AGREE → proceed with confidence
-```
-
-This turns `consult_peer` from a simple review tool into a **cross-model reasoning amplifier** — the architectural equivalent of having two independent experts audit the same design.
-
 ## Features
 
-- **`delegate_task`** — Fire-and-forget task delegation to Gemini CLI (full filesystem access)
-- **`delegate_task_readonly`** — Read-only analysis mode (plan mode, no file modifications)
-- **`consult_peer`** — Architectural peer review with structured verdicts (AGREE / SUGGEST_CHANGES / DISAGREE)
+### 🚀 Task Delegation
+- **`delegate_task`** — Non-blocking task delegation to Gemini CLI (full filesystem access)
+- **`delegate_task_readonly`** — Read-only analysis (plan mode, no destructive actions)
 - **`get_task_result`** — Poll task status and retrieve results
-- **`list_sessions`** — List available Gemini CLI sessions for resumption
-- **`list_skills` / `create_skill` / `delete_skill`** — Manage Gemini CLI skills (.gemini/skills/*.md)
 
-## Architecture
-
-```
-index.js                    ← Entry point (stdio transport)
-src/
-├── server.js               ← MCP server setup + tool routing
-├── tool-definitions.js     ← Tool schemas (JSON Schema)
-├── tools/
-│   ├── consult.js          ← Peer review via Gemini CLI
-│   ├── results.js          ← Task store + result formatting
-│   └── skills.js           ← Skill file management
-└── runner/
-    ├── config.js           ← Runner config loader (local/SSH)
-    ├── gemini-runner.js    ← Process spawning (streaming + headless)
-    ├── process-manager.js  ← PID tracking, process group kill
-    └── ssh.js              ← Shell escaping, remote PID tracking
-```
-
-## Process Management
-
-Spawns Gemini CLI with `detached: true` and kills the entire process group on timeout/exit:
-
-```javascript
-// On timeout — kills child AND all its subprocesses
-process.kill(-child.pid, 'SIGTERM');
-```
-
-Handles SIGTERM/SIGINT gracefully — all tracked child processes are terminated on server shutdown.
-
-## Remote Workers (SSH)
-
-Run Gemini CLI on remote servers via SSH. The remote server needs only `gemini` CLI installed and authenticated — agent-pool handles everything else.
-
-### Configuration
-
-Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/config.json`:
-
-```json
-{
-  "runners": [
-    { "id": "local", "type": "local" },
-    { "id": "gpu", "type": "ssh", "host": "gpu-server", "cwd": "/home/dev/project" },
-    { "id": "analysis", "type": "ssh", "host": "user@10.0.0.5", "cwd": "/opt/repos/project" }
-  ],
-  "defaultRunner": "local"
-}
-```
-
-SSH authentication, ports, and jump hosts are managed through your standard `~/.ssh/config` — agent-pool just calls `ssh <host>`.
-
-### Usage
-
-```javascript
-delegate_task({
-  prompt: 'Run performance benchmarks',
-  runner: 'gpu',  // uses SSH runner defined in config
-});
-```
-
-### How it works
-
-1. Spawns `ssh <host> 'cd <cwd> && echo REMOTE_PID:$$ && exec gemini ...'`
-2. Parses remote PID from first stdout line
-3. Streams JSON output through SSH (same as local)
-4. On timeout: kills local SSH process group + sends `ssh <host> kill -TERM -<PID>`
-
-### Recommended: SSH ControlMaster
-
-For faster connection reuse, add to `~/.ssh/config`:
+### 🤝 Cross-Model Peer Review
+- **`consult_peer`** — Architectural review with structured verdicts (AGREE / SUGGEST_CHANGES / DISAGREE)
+- Supports iterative rounds: propose → get feedback → revise → re-send until consensus
+- Cross-model consensus eliminates single-model blind spots
 
 ```
-Host gpu-server
-  ControlMaster auto
-  ControlPath ~/.ssh/sockets/%r@%h-%p
-  ControlPersist 600
+┌──────────────────┐     consult_peer      ┌──────────────────┐
+│  Claude Opus 4   │ ──── proposal ──────▶ │  Gemini Pro      │
+│  (primary agent) │ ◀─── verdict ──────── │  (peer reviewer) │
+└──────────────────┘                       └──────────────────┘
 ```
 
-### Code sync workflow
+### 📋 Session & Skill Management
+- **`list_sessions`** — Resume previous Gemini CLI conversations
+- **`list_skills` / `create_skill` / `delete_skill`** — Manage `.gemini/skills/*.md`
 
-Agent-pool doesn't sync code automatically — keep your remote repos in sync via Git:
+### 🌐 Remote Workers (SSH)
+- Run workers on remote servers via SSH — same interface, transparent stdio forwarding
+- Remote PID tracking for reliable cleanup on timeout
+- Safe shell escaping for all arguments
 
-```bash
-# Before delegating remote tasks:
-ssh gpu-server 'cd /home/dev/project && git pull'
+## MCP Ecosystem
+
+Agent-pool is designed to work alongside other MCP servers. The combination amplifies each tool's capabilities at **both levels** — the primary IDE agent and the delegated Gemini CLI workers.
+
+### Works with [Project Graph MCP](https://github.com/rnd-pro/project-graph-mcp)
+
+| Layer | agent-pool-mcp | project-graph-mcp |
+|-------|---------------|-------------------|
+| **Primary IDE agent** | Delegates tasks, consults peer | Navigates codebase, runs quality analysis |
+| **Gemini CLI workers** | Executes delegated tasks | Available as MCP tool inside Gemini CLI |
+
+**Typical workflow:**
+
 ```
+1. Primary agent uses project-graph to understand codebase structure
+2. Primary agent uses consult_peer to validate architectural proposal
+3. Primary agent delegates implementation to Gemini CLI worker
+4. Gemini CLI worker uses project-graph to navigate code and verify quality
+5. Primary agent checks results with get_task_result
+```
+
+Both servers complement each other:
+- **project-graph-mcp** provides codebase context (10-50x compressed AST graphs, code quality metrics, test checklists)
+- **agent-pool-mcp** provides execution capacity (parallel workers, cross-model review, remote SSH runners)
+
+### Works with [Stitch MCP](https://github.com/nicenathapong/stitch-mcp)
+
+Use agent-pool to delegate Stitch-based UI generation to background workers while the primary agent handles integration.
 
 ## Installation
 
@@ -169,9 +95,7 @@ cd agent-pool-mcp
 npm install
 ```
 
-## Usage
-
-Add agent-pool to your IDE's MCP configuration. All spawned workers reuse your existing `gemini` CLI authentication — the same account you already use for Gemini CLI.
+## MCP Configuration
 
 ### Antigravity IDE
 
@@ -209,42 +133,71 @@ Add agent-pool to your IDE's MCP configuration. All spawned workers reuse your e
 claude mcp add agent-pool node /path/to/agent-pool-mcp/index.js
 ```
 
-### Standalone
+## Remote Workers
 
-```bash
-node index.js
+Run Gemini CLI on remote servers via SSH. The remote server needs only `gemini` CLI installed and authenticated.
+
+Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/config.json`:
+
+```json
+{
+  "runners": [
+    { "id": "local", "type": "local" },
+    { "id": "gpu", "type": "ssh", "host": "gpu-server", "cwd": "/home/dev/project" }
+  ],
+  "defaultRunner": "local"
+}
 ```
-
-The server communicates via stdio (MCP standard transport).
-
-## Skills
-
-Skills are markdown files with YAML frontmatter that define agent behavior. Place them in `.gemini/skills/` of your project:
-
-```markdown
----
-name: code-reviewer
-description: Reviews code for quality and patterns.
----
-
-# Code Reviewer Skill
-
-You are a senior code reviewer...
-```
-
-Then activate with `delegate_task`:
 
 ```javascript
 delegate_task({
-  prompt: 'Review src/server.js',
+  prompt: 'Run performance benchmarks',
+  runner: 'gpu',
+});
+```
+
+SSH authentication is managed through `~/.ssh/config`. Recommended: enable [ControlMaster](https://man.openbsd.org/ssh_config#ControlMaster) for connection reuse.
+
+Keep remote repos in sync via Git before delegating:
+```bash
+ssh gpu-server 'cd /home/dev/project && git pull'
+```
+
+## Skills
+
+Skills are markdown files with YAML frontmatter that extend Gemini CLI agent behavior:
+
+```javascript
+delegate_task({
+  prompt: 'Review src/server.js for security issues',
   skill: 'code-reviewer',
 });
 ```
 
-See [`examples/`](examples/) for complete skill templates:
-- **[parallel-work.md](examples/parallel-work.md)** — **Orchestration skill for the calling agent** (timeout rules, delegation patterns, no-bypass policy, `consult_peer` protocol)
+See [`examples/`](examples/) for templates:
+- **[parallel-work.md](examples/parallel-work.md)** — Orchestration skill for the calling agent (delegation patterns, `consult_peer` protocol)
 - **[code-reviewer.md](examples/code-reviewer.md)** — Code review with structured verdicts
 - **[research-analyst.md](examples/research-analyst.md)** — Technical research with findings reports
+
+## Architecture
+
+```
+index.js                    ← Entry point (stdio transport)
+src/
+├── server.js               ← MCP server setup + tool routing
+├── tool-definitions.js     ← Tool schemas (JSON Schema)
+├── tools/
+│   ├── consult.js          ← Peer review via Gemini CLI
+│   ├── results.js          ← Task store + result formatting
+│   └── skills.js           ← Skill file management
+└── runner/
+    ├── config.js           ← Runner config loader (local/SSH)
+    ├── gemini-runner.js    ← Process spawning (streaming + headless)
+    ├── process-manager.js  ← PID tracking, process group kill
+    └── ssh.js              ← Shell escaping, remote PID tracking
+```
+
+**Process management:** Spawns with `detached: true`, kills entire process group (`kill -TERM -pid`) on timeout. Handles SIGTERM/SIGINT gracefully — all tracked child processes are terminated on server shutdown.
 
 ## Requirements
 
