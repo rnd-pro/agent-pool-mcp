@@ -1,0 +1,13 @@
+{
+  "name": "agent-pool-mcp",
+  "version": "3.0.0",
+  "type": "module",
+  "description": "MCP Server for multi-agent task delegation and orchestration via Gemini CLI",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
