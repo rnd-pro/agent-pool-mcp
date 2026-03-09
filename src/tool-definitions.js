@@ -19,7 +19,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'The task description for the Gemini agent. Be specific and detailed.' },
-        cwd: { type: 'string', description: 'Working directory for the agent. Defaults to the Mr-Computer project root.' },
+        cwd: { type: 'string', description: 'Working directory for the agent. Defaults to current working directory.' },
         model: { type: 'string', description: 'Model to use. Options: gemini-3.1-pro-preview, gemini-3-flash-preview. Leave empty for Auto mode.' },
         approval_mode: {
           type: 'string',
@@ -47,7 +47,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'The analysis task for the Gemini agent.' },
-        cwd: { type: 'string', description: 'Working directory. Defaults to the Mr-Computer project root.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
         model: { type: 'string', description: 'Model to use. Leave empty for Auto.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
@@ -69,7 +69,7 @@ export const TOOL_DEFINITIONS = [
         context: { type: 'string', description: 'Project context: what are we working on, constraints, requirements.' },
         proposal: { type: 'string', description: 'Your technical proposal or architectural decision to review.' },
         previous_rounds: { type: 'string', description: 'Summary of previous discussion rounds (if iterating toward consensus).' },
-        cwd: { type: 'string', description: 'Working directory for file access. Defaults to Mr-Computer root.' },
+        cwd: { type: 'string', description: 'Working directory for file access. Defaults to current working directory.' },
         model: { type: 'string', description: 'Model to use. Default: Auto.' },
       },
       required: ['context', 'proposal'],
@@ -92,7 +92,7 @@ export const TOOL_DEFINITIONS = [
     inputSchema: {
       type: 'object',
       properties: {
-        cwd: { type: 'string', description: 'Project directory to list sessions for. Defaults to Mr-Computer root.' },
+        cwd: { type: 'string', description: 'Project directory to list sessions for. Defaults to current working directory.' },
       },
     },
   },
@@ -102,7 +102,7 @@ export const TOOL_DEFINITIONS = [
     inputSchema: {
       type: 'object',
       properties: {
-        cwd: { type: 'string', description: 'Project directory. Defaults to Mr-Computer root.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
     },
   },
@@ -115,7 +115,7 @@ export const TOOL_DEFINITIONS = [
         skill_name: { type: 'string', description: 'Skill name (used as filename, e.g. "code-reviewer").' },
         description: { type: 'string', description: 'Short description of what the skill does.' },
         instructions: { type: 'string', description: 'Full markdown instructions for the skill. Define the agent role, rules, and output format.' },
-        cwd: { type: 'string', description: 'Project directory. Defaults to Mr-Computer root.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
       required: ['skill_name', 'description', 'instructions'],
     },
@@ -127,7 +127,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         skill_name: { type: 'string', description: 'Skill name to delete.' },
-        cwd: { type: 'string', description: 'Project directory. Defaults to Mr-Computer root.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
       required: ['skill_name'],
     },
