@@ -9,11 +9,9 @@ Orchestrate work between a **primary agent** (e.g. Antigravity/Claude IDE — br
 
 ## Agent-Pool Infrastructure
 
-> **This is a development tool.** The source code is local. Fix bugs immediately.
-
 - **Source**: `agent-pool-mcp/` (this repository)
 - **Entry**: `index.js` → `src/server.js` → `src/tools/*.js`, `src/runner/*.js`
-- **MCP Config**: `~/.gemini/antigravity/mcp_config.json`
+- **Config**: Add to your IDE's MCP server config (see README)
 
 ### Debugging
 
@@ -33,7 +31,7 @@ node agent-pool-mcp/index.js
 - Agents spawn with `detached: true` for process group isolation
 - On timeout: `process.kill(-pid, 'SIGTERM')` kills entire tree
 - On server SIGTERM/SIGINT: all tracked children are killed
-- If timeout fires but process survives → **BUG** → fix `process-manager.js`
+- If timeout fires but process survives — check `process-manager.js`
 
 ## Core Principle: File Ownership
 
@@ -136,8 +134,8 @@ This is not optional. Even if you already have a plan, the peer may identify:
 ```javascript
 // REQUIRED before coding ANY new feature:
 consult_peer({
-  context: 'Building template/builder node for workflow editor',
-  proposal: 'Hybrid UE auto-pins + n8n preview + ComfyUI inline...',
+  context: 'Adding a new authentication layer to the API',
+  proposal: 'JWT-based auth with refresh tokens, middleware pattern...',
 })
 // Wait for AGREE before proceeding
 // If SUGGEST_CHANGES — revise and re-consult
@@ -145,22 +143,12 @@ consult_peer({
 
 **The consultation phase is part of the work, not overhead. Skipping it to "save time" creates rework.**
 
-### Broken Tool Priority
-
-> **If a tool or instrument doesn't work — FIX IT FIRST, then continue the task.**
-
-This applies to:
-- **MCP tools** (agent-pool, project-graph) — if a tool returns errors, debug and fix the MCP server before proceeding
-- **Submodules** — if the upstream project is missing a feature or has a bug, fix there first
-- **Build tools** — if the build breaks, fix it before writing more code
-
 ## Anti-Patterns
 
 ❌ Both agents editing the same file  
 ❌ Vague prompts without scope boundaries  
 ❌ Forgetting to check `get_task_result` for background tasks  
 ❌ Delegating without providing file context  
-❌ Working around a broken tool instead of fixing it first  
 ❌ Setting timeout < 300s for research tasks  
 ❌ Bypassing delegation by doing agent's work yourself  
 ❌ Starting implementation before agent research completes  
