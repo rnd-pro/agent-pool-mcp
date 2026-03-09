@@ -100,6 +100,7 @@ delegate_task({
 ```
 
 See [`examples/`](examples/) for complete skill templates:
+- **[parallel-work.md](examples/parallel-work.md)** — **Orchestration skill for the calling agent** (timeout rules, delegation patterns, no-bypass policy, `consult_peer` protocol)
 - **[code-reviewer.md](examples/code-reviewer.md)** — Code review with structured verdicts
 - **[research-analyst.md](examples/research-analyst.md)** — Technical research with findings reports
 
