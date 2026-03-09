@@ -87,8 +87,10 @@ src/
 │   ├── results.js          ← Task store + result formatting
 │   └── skills.js           ← Skill file management
 └── runner/
-    ├── gemini-runner.js    ← Gemini CLI process spawning (streaming + headless)
-    └── process-manager.js  ← PID tracking, process group kill, SIGTERM cleanup
+    ├── config.js           ← Runner config loader (local/SSH)
+    ├── gemini-runner.js    ← Process spawning (streaming + headless)
+    ├── process-manager.js  ← PID tracking, process group kill
+    └── ssh.js              ← Shell escaping, remote PID tracking
 ```
 
 ## Process Management
@@ -101,6 +103,63 @@ process.kill(-child.pid, 'SIGTERM');
 ```
 
 Handles SIGTERM/SIGINT gracefully — all tracked child processes are terminated on server shutdown.
+
+## Remote Workers (SSH)
+
+Run Gemini CLI on remote servers via SSH. The remote server needs only `gemini` CLI installed and authenticated — agent-pool handles everything else.
+
+### Configuration
+
+Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/config.json`:
+
+```json
+{
+  "runners": [
+    { "id": "local", "type": "local" },
+    { "id": "gpu", "type": "ssh", "host": "gpu-server", "cwd": "/home/dev/project" },
+    { "id": "analysis", "type": "ssh", "host": "user@10.0.0.5", "cwd": "/opt/repos/project" }
+  ],
+  "defaultRunner": "local"
+}
+```
+
+SSH authentication, ports, and jump hosts are managed through your standard `~/.ssh/config` — agent-pool just calls `ssh <host>`.
+
+### Usage
+
+```javascript
+delegate_task({
+  prompt: 'Run performance benchmarks',
+  runner: 'gpu',  // uses SSH runner defined in config
+});
+```
+
+### How it works
+
+1. Spawns `ssh <host> 'cd <cwd> && echo REMOTE_PID:$$ && exec gemini ...'`
+2. Parses remote PID from first stdout line
+3. Streams JSON output through SSH (same as local)
+4. On timeout: kills local SSH process group + sends `ssh <host> kill -TERM -<PID>`
+
+### Recommended: SSH ControlMaster
+
+For faster connection reuse, add to `~/.ssh/config`:
+
+```
+Host gpu-server
+  ControlMaster auto
+  ControlPath ~/.ssh/sockets/%r@%h-%p
+  ControlPersist 600
+```
+
+### Code sync workflow
+
+Agent-pool doesn't sync code automatically — keep your remote repos in sync via Git:
+
+```bash
+# Before delegating remote tasks:
+ssh gpu-server 'cd /home/dev/project && git pull'
+```
 
 ## Installation
 
