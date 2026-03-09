@@ -8,6 +8,8 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
+import { getRunner } from './config.js';
+import { buildSshSpawn, parseRemotePid, killRemoteProcess } from './ssh.js';
 
 const DEFAULT_TIMEOUT_SEC = 600;
 const DEFAULT_APPROVAL_MODE = 'yolo';
@@ -88,8 +90,10 @@ export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, s
  * @param {string} [options.taskId] - Task ID for tracking
  * @returns {Promise<object>} Collected events and final response
  */
-export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId }) {
+export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId }) {
   return new Promise((resolve, reject) => {
+    const runner = getRunner(runnerId);
+    const isRemote = runner.type === 'ssh';
     const args = [];
 
     if (sessionId) {
@@ -104,26 +108,43 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
 
-    // detached: true — allows killing entire process group with -pid
-    const child = spawn('gemini', args, {
-      cwd: cwd ?? process.cwd(),
-      env: { ...process.env, TERM: 'dumb', CI: '1' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: true,
-    });
+    let spawnCmd, spawnArgs, spawnOpts;
 
-    trackChild(child.pid, taskId ?? 'streaming', 'gemini-streaming');
+    if (isRemote) {
+      const ssh = buildSshSpawn(runner, args, cwd ?? process.cwd());
+      spawnCmd = ssh.command;
+      spawnArgs = ssh.args;
+      spawnOpts = { stdio: ['pipe', 'pipe', 'pipe'], detached: true };
+    } else {
+      spawnCmd = 'gemini';
+      spawnArgs = args;
+      spawnOpts = {
+        cwd: cwd ?? process.cwd(),
+        env: { ...process.env, TERM: 'dumb', CI: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
+      };
+    }
+
+    const child = spawn(spawnCmd, spawnArgs, spawnOpts);
+
+    trackChild(child.pid, taskId ?? 'streaming', `gemini-${isRemote ? 'ssh' : 'local'}`);
 
     const events = [];
     let stderrData = '';
     let buffer = '';
     let timeoutHandle;
+    let remotePid = null;
 
     if (timeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
-        // Kill entire process group — NOT just the child
+        // Kill local process group
         killGroup(child.pid);
-        reject(new Error(`Gemini CLI timed out after ${timeout ?? DEFAULT_TIMEOUT_SEC}s`));
+        // Kill remote process if SSH
+        if (isRemote && remotePid) {
+          killRemoteProcess(runner.host, remotePid);
+        }
+        reject(new Error(`Gemini CLI timed out after ${timeout ?? DEFAULT_TIMEOUT_SEC}s (runner: ${runner.id})`));
       }, timeoutMs);
     }
 
@@ -135,6 +156,16 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
+
+        // Parse remote PID from SSH wrapper
+        if (isRemote && !remotePid) {
+          const pid = parseRemotePid(trimmed);
+          if (pid) {
+            remotePid = pid;
+            continue; // Don't parse PID line as JSON
+          }
+        }
+
         try {
           events.push(JSON.parse(trimmed));
         } catch {

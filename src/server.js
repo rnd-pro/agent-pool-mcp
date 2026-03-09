@@ -92,6 +92,7 @@ function handleDelegateTask(args) {
     timeout: args.timeout ?? DEFAULT_TIMEOUT_SEC,
     sessionId: args.session_id,
     taskId,
+    runner: args.runner,
   };
 
   createTask(taskId, args.prompt);
@@ -103,7 +104,7 @@ function handleDelegateTask(args) {
   return {
     content: [{
       type: 'text',
-      text: `🚀 Task delegated.\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${args.approval_mode ?? DEFAULT_APPROVAL_MODE}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `🚀 Task delegated.\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${args.approval_mode ?? DEFAULT_APPROVAL_MODE}${args.runner ? `\n- **Runner**: ${args.runner}` : ''}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
@@ -122,6 +123,7 @@ function handleDelegateReadonly(args) {
     approvalMode: 'plan',
     timeout: args.timeout ?? DEFAULT_TIMEOUT_SEC,
     taskId,
+    runner: args.runner,
   };
 
   createTask(taskId, args.prompt);
