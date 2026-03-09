@@ -75,6 +75,34 @@ node index.js
 
 The server communicates via stdio (MCP standard transport).
 
+## Skills
+
+Skills are markdown files with YAML frontmatter that define agent behavior. Place them in `.gemini/skills/` of your project:
+
+```markdown
+---
+name: code-reviewer
+description: Reviews code for quality and patterns.
+---
+
+# Code Reviewer Skill
+
+You are a senior code reviewer...
+```
+
+Then activate with `delegate_task`:
+
+```javascript
+delegate_task({
+  prompt: 'Review src/server.js',
+  skill: 'code-reviewer',
+});
+```
+
+See [`examples/`](examples/) for complete skill templates:
+- **[code-reviewer.md](examples/code-reviewer.md)** — Code review with structured verdicts
+- **[research-analyst.md](examples/research-analyst.md)** — Technical research with findings reports
+
 ## Requirements
 
 - Node.js >= 20
