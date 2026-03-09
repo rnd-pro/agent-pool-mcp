@@ -26,6 +26,46 @@ Your AI coding assistant (Antigravity, Cursor, Windsurf, or any MCP-compatible I
 
 The primary agent focuses on interactive work (UI, browser, user communication), while Gemini CLI agents handle background tasks: code analysis, testing, research, refactoring — all running in parallel.
 
+## Cross-Model Peer Review
+
+The most powerful pattern emerges when your primary IDE agent and Gemini CLI workers are **different foundation models** — for example, Claude (Antigravity/Cursor) + Gemini (CLI workers).
+
+When you call `consult_peer`, you get **cross-model architectural consensus**:
+
+```
+┌──────────────────┐        consult_peer        ┌──────────────────┐
+│  Claude Opus 4   │ ────── proposal ──────────▶ │  Gemini Pro      │
+│  (primary agent) │ ◀───── verdict ─────────── │  (peer reviewer) │
+│                  │                             │                  │
+│  Strengths:      │                             │  Strengths:      │
+│  · Deep reasoning│                             │  · Codebase scan │
+│  · Nuanced code  │                             │  · Broad context │
+│  · UI/UX sense   │                             │  · Pattern match │
+└──────────────────┘                             └──────────────────┘
+                         ↓
+               Cross-model consensus
+          (blind spots cancel each other out)
+```
+
+**Why this matters:**
+
+- A single model reviewing its own plan has **systematic blind spots** — it tends to agree with itself
+- Two different models trained on different data with different architectures catch **complementary issues**
+- The structured verdict protocol (AGREE / SUGGEST_CHANGES / DISAGREE) forces explicit reasoning
+- Iterative rounds let you refine until both models agree — the final result is stronger than either alone
+
+```javascript
+// Claude proposes → Gemini reviews → iterate until AGREE
+const verdict = await consult_peer({
+  context: 'Extracting auth module from monolith',
+  proposal: 'JWT + refresh tokens, middleware pattern...',
+});
+// verdict: SUGGEST_CHANGES → revise → re-consult
+// verdict: AGREE → proceed with confidence
+```
+
+This turns `consult_peer` from a simple review tool into a **cross-model reasoning amplifier** — the architectural equivalent of having two independent experts audit the same design.
+
 ## Features
 
 - **`delegate_task`** — Fire-and-forget task delegation to Gemini CLI (full filesystem access)
