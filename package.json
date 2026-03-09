@@ -4,8 +4,31 @@
   "type": "module",
   "description": "MCP Server for multi-agent task delegation and orchestration via Gemini CLI",
   "main": "index.js",
+  "bin": {
+    "agent-pool-mcp": "index.js"
+  },
   "scripts": {
     "start": "node index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "gemini",
+    "gemini-cli",
+    "agent",
+    "multi-agent",
+    "delegation",
+    "orchestration",
+    "ai"
+  ],
+  "author": "Vladislav Matiyasevich",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rnd-pro/agent-pool-mcp.git"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0"
