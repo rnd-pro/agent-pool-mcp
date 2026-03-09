@@ -10,18 +10,16 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { homedir } from 'node:os';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { runGeminiStreaming, runGeminiHeadless, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
+import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
 import { createTask, completeTask, failTask, formatTaskResult } from './tools/results.js';
 import { listSkills, createSkill, deleteSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 
-const defaultCwd = path.join(homedir(), 'Documents/GitHub/Mr-Computer');
+const defaultCwd = process.cwd();
 
 /**
  * Create and configure the MCP server.
@@ -73,10 +71,16 @@ export function createServer() {
 // ─── Tool Handlers ──────────────────────────────────────────────────
 
 /**
- * @param {object} args
+ * Shared handler for delegate_task and delegate_task_readonly.
+ *
+ * @param {object} args - Tool arguments
+ * @param {object} defaults - Override defaults for the mode
+ * @param {string} defaults.approvalMode - Approval mode
+ * @param {string} defaults.emoji - Status emoji
+ * @param {string} defaults.label - Status label
  * @returns {{content: Array<{type: string, text: string}>}}
  */
-function handleDelegateTask(args) {
+function handleDelegate(args, { approvalMode, emoji, label }) {
   const taskId = randomUUID();
   let prompt = args.prompt;
 
@@ -88,7 +92,7 @@ function handleDelegateTask(args) {
     prompt,
     cwd: args.cwd ?? defaultCwd,
     model: args.model,
-    approvalMode: args.approval_mode ?? DEFAULT_APPROVAL_MODE,
+    approvalMode: args.approval_mode ?? approvalMode,
     timeout: args.timeout ?? DEFAULT_TIMEOUT_SEC,
     sessionId: args.session_id,
     taskId,
@@ -101,43 +105,31 @@ function handleDelegateTask(args) {
     .then((result) => completeTask(taskId, result))
     .catch((err) => failTask(taskId, err.message));
 
+  const mode = args.approval_mode ?? approvalMode;
+  const runnerInfo = args.runner ? `\n- **Runner**: ${args.runner}` : '';
+
   return {
     content: [{
       type: 'text',
-      text: `🚀 Task delegated.\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${args.approval_mode ?? DEFAULT_APPROVAL_MODE}${args.runner ? `\n- **Runner**: ${args.runner}` : ''}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
 
-/**
- * @param {object} args
- * @returns {{content: Array<{type: string, text: string}>}}
- */
+function handleDelegateTask(args) {
+  return handleDelegate(args, {
+    approvalMode: DEFAULT_APPROVAL_MODE,
+    emoji: '🚀',
+    label: 'Task delegated.',
+  });
+}
+
 function handleDelegateReadonly(args) {
-  const taskId = randomUUID();
-
-  const taskOpts = {
-    prompt: args.prompt,
-    cwd: args.cwd ?? defaultCwd,
-    model: args.model,
+  return handleDelegate(args, {
     approvalMode: 'plan',
-    timeout: args.timeout ?? DEFAULT_TIMEOUT_SEC,
-    taskId,
-    runner: args.runner,
-  };
-
-  createTask(taskId, args.prompt);
-
-  runGeminiStreaming(taskOpts)
-    .then((result) => completeTask(taskId, result))
-    .catch((err) => failTask(taskId, err.message));
-
-  return {
-    content: [{
-      type: 'text',
-      text: `🔍 Read-only analysis started.\n\n- **Task ID**: \`${taskId}\`\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
-    }],
-  };
+    emoji: '🔍',
+    label: 'Read-only analysis started.',
+  });
 }
 
 /**
