@@ -19,6 +19,9 @@ import { consultPeer } from './tools/consult.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 const defaultCwd = process.cwd();
 
 /**
@@ -95,7 +98,15 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   let prompt = args.prompt;
 
   if (args.skill) {
-    prompt = `CRITICAL INSTRUCTION: You MUST start your execution by immediately calling the activate_skill tool with the name '${args.skill}'. After activation, proceed with the following task:\n\n${prompt}`;
+    const skillFileName = args.skill.endsWith('.md') ? args.skill : `${args.skill}.md`;
+    const cwd = args.cwd ?? defaultCwd;
+    const skillPath = path.join(cwd, '.gemini', 'skills', skillFileName);
+    try {
+      const skillContent = fs.readFileSync(skillPath, 'utf-8');
+      prompt = `## Active Skill: ${args.skill}\n\nFollow these instructions:\n\n${skillContent}\n\n---\n\n## Task\n\n${prompt}`;
+    } catch {
+      prompt = `NOTE: Skill '${args.skill}' was requested but file not found at ${skillPath}. Proceed with the task.\n\n${prompt}`;
+    }
   }
 
   const taskOpts = {
