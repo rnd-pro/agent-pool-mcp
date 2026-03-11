@@ -115,7 +115,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'list_skills',
-    description: 'List available Gemini CLI skills (.gemini/skills/*.md) for a project. Returns skill names and descriptions parsed from YAML frontmatter.',
+    description: 'List available Gemini CLI skills from all tiers: project (.gemini/skills/), user-global (~/.gemini/skills/), and built-in (shipped with agent-pool). Shows tier label for each skill.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -125,13 +125,14 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'create_skill',
-    description: 'Create or update a Gemini CLI skill. Writes a .md file with YAML frontmatter to .gemini/skills/. Use with delegate_task skill parameter to activate.',
+    description: 'Create or update a Gemini CLI skill. Writes a .md file with YAML frontmatter. Use scope to control where: "project" (default) or "global" (~/.gemini/skills/).',
     inputSchema: {
       type: 'object',
       properties: {
         skill_name: { type: 'string', description: 'Skill name (used as filename, e.g. "code-reviewer").' },
         description: { type: 'string', description: 'Short description of what the skill does.' },
         instructions: { type: 'string', description: 'Full markdown instructions for the skill. Define the agent role, rules, and output format.' },
+        scope: { type: 'string', enum: ['project', 'global'], description: 'Where to save: "project" (default, .gemini/skills/) or "global" (~/.gemini/skills/).' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
       required: ['skill_name', 'description', 'instructions'],
@@ -139,11 +140,24 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'delete_skill',
-    description: 'Delete a Gemini CLI skill by name. Removes the .md file from .gemini/skills/.',
+    description: 'Delete a Gemini CLI skill by name. Specify scope to target project or global tier.',
     inputSchema: {
       type: 'object',
       properties: {
         skill_name: { type: 'string', description: 'Skill name to delete.' },
+        scope: { type: 'string', enum: ['project', 'global'], description: 'Tier to delete from: "project" (default) or "global".' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['skill_name'],
+    },
+  },
+  {
+    name: 'install_skill',
+    description: 'Install a global or built-in skill into the current project. Copies the skill file for local customization. Use list_skills to see available skills from all tiers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        skill_name: { type: 'string', description: 'Skill name to install (e.g. "code-reviewer").' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
       required: ['skill_name'],

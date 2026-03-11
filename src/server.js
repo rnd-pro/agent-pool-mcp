@@ -14,13 +14,10 @@ import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, cancelTask } from './tools/results.js';
-import { listSkills, createSkill, deleteSkill } from './tools/skills.js';
+import { listSkills, findSkill, createSkill, deleteSkill, installSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
-
-import fs from 'node:fs';
-import path from 'node:path';
 
 const defaultCwd = process.cwd();
 
@@ -31,7 +28,7 @@ const defaultCwd = process.cwd();
  */
 export function createServer() {
   const server = new Server(
-    { name: 'agent-pool', version: '3.0.0' },
+    { name: 'agent-pool', version: '3.1.0' },
     { capabilities: { tools: {} } },
   );
 
@@ -63,6 +60,8 @@ export function createServer() {
           response = handleCreateSkill(args); break;
         case 'delete_skill':
           response = handleDeleteSkill(args); break;
+        case 'install_skill':
+          response = handleInstallSkill(args); break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -98,14 +97,12 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   let prompt = args.prompt;
 
   if (args.skill) {
-    const skillFileName = args.skill.endsWith('.md') ? args.skill : `${args.skill}.md`;
     const cwd = args.cwd ?? defaultCwd;
-    const skillPath = path.join(cwd, '.gemini', 'skills', skillFileName);
-    try {
-      const skillContent = fs.readFileSync(skillPath, 'utf-8');
-      prompt = `## Active Skill: ${args.skill}\n\nFollow these instructions:\n\n${skillContent}\n\n---\n\n## Task\n\n${prompt}`;
-    } catch {
-      prompt = `NOTE: Skill '${args.skill}' was requested but file not found at ${skillPath}. Proceed with the task.\n\n${prompt}`;
+    const found = findSkill(cwd, args.skill);
+    if (found) {
+      prompt = `## Active Skill: ${args.skill} [${found.tier}]\n\nFollow these instructions:\n\n${found.content}\n\n---\n\n## Task\n\n${prompt}`;
+    } else {
+      prompt = `NOTE: Skill '${args.skill}' was requested but not found in any tier (project, global, built-in). Proceed with the task.\n\n${prompt}`;
     }
   }
 
@@ -128,11 +125,12 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
 
   const mode = args.approval_mode ?? approvalMode;
   const runnerInfo = args.runner ? `\n- **Runner**: ${args.runner}` : '';
+  const skillInfo = args.skill ? `\n- **Skill**: ${args.skill}` : '';
 
   return {
     content: [{
       type: 'text',
-      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
@@ -176,7 +174,7 @@ function handleListSkills(args) {
     return { content: [{ type: 'text', text: 'No skills found. Use create_skill to create one.' }] };
   }
   const lines = skills.map(
-    (s) => `- **${s.name}** — ${s.description} (\`${s.fileName}\`)`,
+    (s) => `- **${s.name}** — ${s.description} (\`${s.fileName}\`) [${s.tier}]`,
   );
   return {
     content: [{ type: 'text', text: `## Available Skills (${skills.length})\n\n${lines.join('\n')}` }],
@@ -185,22 +183,43 @@ function handleListSkills(args) {
 
 /** @param {object} args */
 function handleCreateSkill(args) {
-  const filePath = createSkill(args.cwd ?? defaultCwd, args.skill_name, args.description, args.instructions);
+  const scope = args.scope ?? 'project';
+  const filePath = createSkill(args.cwd ?? defaultCwd, args.skill_name, args.description, args.instructions, scope);
   return {
     content: [{
       type: 'text',
-      text: `✅ Skill created: \`${args.skill_name}\`\nPath: \`${filePath}\`\n\nUse with delegate_task: \`skill: "${args.skill_name}"\``,
+      text: `✅ Skill created [${scope}]: \`${args.skill_name}\`\nPath: \`${filePath}\`\n\nUse with delegate_task: \`skill: "${args.skill_name}"\``,
     }],
   };
 }
 
 /** @param {object} args */
 function handleDeleteSkill(args) {
-  const deleted = deleteSkill(args.cwd ?? defaultCwd, args.skill_name);
+  const scope = args.scope ?? 'project';
+  const deleted = deleteSkill(args.cwd ?? defaultCwd, args.skill_name, scope);
   return {
     content: [{
       type: 'text',
-      text: deleted ? `✅ Skill deleted: \`${args.skill_name}\`` : `❌ Skill not found: \`${args.skill_name}\``,
+      text: deleted ? `✅ Skill deleted [${scope}]: \`${args.skill_name}\`` : `❌ Skill not found [${scope}]: \`${args.skill_name}\``,
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleInstallSkill(args) {
+  const result = installSkill(args.cwd ?? defaultCwd, args.skill_name);
+  if (!result) {
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Skill \`${args.skill_name}\` not found in global or built-in tiers. Use \`list_skills\` to see available skills.`,
+      }],
+    };
+  }
+  return {
+    content: [{
+      type: 'text',
+      text: `✅ Skill installed into project:\n- **From**: \`${result.from}\` [${result.tier}]\n- **To**: \`${result.to}\`\n\nThe skill is now a local copy — you can customize it for this project.`,
     }],
   };
 }
