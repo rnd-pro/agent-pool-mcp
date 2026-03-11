@@ -14,6 +14,8 @@ export const TOOL_DEFINITIONS = [
       'Use this for parallel work: code review, testing, refactoring, analysis, or any dev task.',
       '',
       'Returns a task_id immediately (non-blocking). Use get_task_result to check status and retrieve the result.',
+      '',
+      'IMPORTANT: Gemini CLI cold start takes ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -43,6 +45,8 @@ export const TOOL_DEFINITIONS = [
       'Use this for code review, architecture analysis, finding bugs, etc.',
       '',
       'Returns a task_id immediately (non-blocking). Use get_task_result to check status and retrieve the result.',
+      '',
+      'IMPORTANT: Gemini CLI cold start takes ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -84,6 +88,17 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         task_id: { type: 'string', description: 'Task ID returned by delegate_task or delegate_task_readonly.' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'cancel_task',
+    description: 'Cancel a running task and kill its process. Use when a task is stuck or no longer needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID to cancel.' },
       },
       required: ['task_id'],
     },

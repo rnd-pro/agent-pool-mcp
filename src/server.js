@@ -13,7 +13,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
-import { createTask, completeTask, failTask, formatTaskResult } from './tools/results.js';
+import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, cancelTask } from './tools/results.js';
 import { listSkills, createSkill, deleteSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 
@@ -39,30 +39,40 @@ export function createServer() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
+    let response;
     try {
       switch (name) {
         case 'delegate_task':
-          return handleDelegateTask(args);
+          response = handleDelegateTask(args); break;
         case 'delegate_task_readonly':
-          return handleDelegateReadonly(args);
+          response = handleDelegateReadonly(args); break;
         case 'get_task_result':
-          return formatTaskResult(args.task_id);
+          response = formatTaskResult(args.task_id); break;
+        case 'cancel_task':
+          response = cancelTask(args.task_id); break;
         case 'consult_peer':
-          return consultPeer(args, defaultCwd);
+          response = await consultPeer(args, defaultCwd); break;
         case 'list_sessions':
-          return handleListSessions(args);
+          response = await handleListSessions(args); break;
         case 'list_skills':
-          return handleListSkills(args);
+          response = handleListSkills(args); break;
         case 'create_skill':
-          return handleCreateSkill(args);
+          response = handleCreateSkill(args); break;
         case 'delete_skill':
-          return handleDeleteSkill(args);
+          response = handleDeleteSkill(args); break;
         default:
-          return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
+          response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
     } catch (error) {
-      return { content: [{ type: 'text', text: `Gemini CLI Error: ${error.message}` }], isError: true };
+      response = { content: [{ type: 'text', text: `Gemini CLI Error: ${error.message}` }], isError: true };
     }
+
+    // Append active tasks footer to every response
+    const footer = getActiveTasks();
+    if (footer && response.content?.[0]?.text) {
+      response.content[0].text += footer;
+    }
+    return response;
   });
 
   return server;
