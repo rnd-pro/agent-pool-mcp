@@ -56,6 +56,7 @@ export const TOOL_DEFINITIONS = [
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
         model: { type: 'string', description: 'Model to use. Leave empty for Auto.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
+        session_id: { type: 'string', description: 'Resume an existing Gemini CLI session by its UUID. Use list_sessions to see available sessions.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results.' },
       },

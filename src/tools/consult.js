@@ -76,14 +76,15 @@ export async function consultPeer(args, defaultCwd) {
     approvalMode: 'plan',
     timeout: 120,
     taskId: 'peer-consult',
+    rawOutput: true,
   });
 
-  const response = result.response ?? result;
+  const response = result.response ?? '';
 
   return {
     content: [{
       type: 'text',
-      text: typeof response === 'string' ? response : JSON.stringify(response, null, 2),
+      text: response || '(no response from peer)',
     }],
   };
 }

@@ -31,7 +31,7 @@ export { DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE, DEFAULT_MODEL };
  * @param {string} [options.taskId] - Task ID for tracking
  * @returns {Promise<object>} Parsed JSON response
  */
-export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, policy }) {
+export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, policy, rawOutput }) {
   return new Promise((resolve, reject) => {
     const args = [];
 
@@ -40,29 +40,48 @@ export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, s
     }
     args.push('-p', prompt);
     args.push(
-      '--output-format', 'json',
+      '--output-format', rawOutput ? 'raw' : 'json',
       '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
     );
-    args.push('--model', model ?? DEFAULT_MODEL);
+    if (model) {
+      args.push('--model', model);
+    }
     if (policy) {
       args.push('--policy', policy);
     }
 
     const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
 
-    const child = execFile('gemini', args, {
+    const child = spawn('gemini', args, {
       cwd: cwd ?? process.cwd(),
-      timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
       env: { ...process.env, TERM: 'dumb', CI: '1' },
-    }, (error, stdout, stderr) => {
+    });
+
+    child.unref();
+    trackChild(child.pid, taskId ?? 'headless', 'gemini-headless');
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+
+    const timer = setTimeout(() => {
+      killGroup(child.pid);
+      reject(new Error(`Gemini CLI timed out after ${timeout ?? DEFAULT_TIMEOUT_SEC}s`));
+    }, timeoutMs);
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
       untrackChild(child.pid);
 
-      if (error) {
-        if (error.killed) {
-          return reject(new Error(`Gemini CLI timed out after ${timeout ?? DEFAULT_TIMEOUT_SEC}s`));
-        }
-        return reject(new Error(`Gemini CLI failed: ${error.message}\nStderr: ${stderr}`));
+      if (code !== 0 && !stdout.trim()) {
+        return reject(new Error(`Gemini CLI failed (exit ${code}): ${stderr}`));
+      }
+
+      if (rawOutput) {
+        return resolve({ response: stdout.trim(), stats: null, raw: true });
       }
 
       try {
@@ -76,7 +95,11 @@ export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, s
       }
     });
 
-    trackChild(child.pid, taskId ?? 'headless', 'gemini-headless');
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      untrackChild(child.pid);
+      reject(new Error(`Failed to spawn gemini: ${err.message}`));
+    });
   });
 }
 
@@ -108,7 +131,9 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       '--output-format', 'stream-json',
       '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
     );
-    args.push('--model', model ?? DEFAULT_MODEL);
+    if (model) {
+      args.push('--model', model);
+    }
     if (policy) {
       args.push('--policy', policy);
     }
