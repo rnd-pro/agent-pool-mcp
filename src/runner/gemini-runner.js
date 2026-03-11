@@ -10,6 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { getRunner } from './config.js';
 import { buildSshSpawn, parseRemotePid, killRemoteProcess } from './ssh.js';
+import { setTaskPid, updateTaskResult, pushTaskEvent } from '../tools/results.js';
 
 const DEFAULT_TIMEOUT_SEC = 600;
 const DEFAULT_APPROVAL_MODE = 'yolo';
@@ -129,22 +130,45 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     const child = spawn(spawnCmd, spawnArgs, spawnOpts);
 
     trackChild(child.pid, taskId ?? 'streaming', `gemini-${isRemote ? 'ssh' : 'local'}`);
+    if (taskId) setTaskPid(taskId, child.pid);
 
     const events = [];
     let stderrData = '';
     let buffer = '';
     let timeoutHandle;
     let remotePid = null;
+    let resolved = false;
 
     if (timeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
-        // Kill local process group
-        killGroup(child.pid);
-        // Kill remote process if SSH
-        if (isRemote && remotePid) {
-          killRemoteProcess(runner.host, remotePid);
-        }
-        reject(new Error(`Gemini CLI timed out after ${timeout ?? DEFAULT_TIMEOUT_SEC}s (runner: ${runner.id})`));
+        // Soft timeout: resolve with partial data, let process continue in background
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+        resolved = true;
+
+        const messages = events.filter((e) => e.type === 'message');
+        const toolUses = events.filter((e) => e.type === 'tool_use');
+        const responseText = messages
+          .filter((m) => m.role === 'assistant')
+          .map((m) => m.content ?? m.text ?? '')
+          .join('\n');
+
+        resolve({
+          sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
+          response: responseText || '⏳ Agent is still working (soft timeout reached). Partial results returned.',
+          stats: null,
+          toolCalls: toolUses.map((t) => ({
+            name: t.tool_name ?? t.name ?? 'unknown',
+            args: t.parameters ?? t.arguments,
+          })),
+          toolResults: [],
+          errors: [],
+          exitCode: null,
+          totalEvents: events.length,
+          softTimeout: true,
+          timeoutSeconds: timeout ?? DEFAULT_TIMEOUT_SEC,
+        });
+        // Process continues running — will be cleaned up on natural exit
       }, timeoutMs);
     }
 
@@ -167,7 +191,9 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         }
 
         try {
-          events.push(JSON.parse(trimmed));
+          const parsed = JSON.parse(trimmed);
+          events.push(parsed);
+          if (taskId) pushTaskEvent(taskId, parsed);
         } catch {
           // Skip non-JSON lines
         }
@@ -181,6 +207,32 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     child.on('close', (code) => {
       clearTimeout(timeoutHandle);
       untrackChild(child.pid);
+
+      // If already resolved via soft timeout, update with final complete result
+      if (resolved) {
+        if (buffer.trim()) {
+          try { events.push(JSON.parse(buffer.trim())); } catch { /* ignore */ }
+        }
+        const messages = events.filter((e) => e.type === 'message');
+        const toolUses = events.filter((e) => e.type === 'tool_use');
+        const toolResults = events.filter((e) => e.type === 'tool_result');
+        const resultEvent = events.find((e) => e.type === 'result');
+        const errors = events.filter((e) => e.type === 'error');
+        const responseText = messages.filter((m) => m.role === 'assistant').map((m) => m.content ?? m.text ?? '').join('\n');
+        if (taskId) {
+          updateTaskResult(taskId, {
+            sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
+            response: resultEvent?.response ?? responseText,
+            stats: resultEvent?.stats ?? null,
+            toolCalls: toolUses.map((t) => ({ name: t.tool_name ?? t.name ?? 'unknown', args: t.parameters ?? t.arguments })),
+            toolResults: toolResults.map((t) => ({ name: t.tool_name ?? t.tool_id ?? t.name ?? 'unknown', output: t.output ? (typeof t.output === 'string' ? t.output.substring(0, 500) : JSON.stringify(t.output)?.substring(0, 500)) : t.status ?? '' })),
+            errors: errors.map((e) => e.message ?? e.error ?? JSON.stringify(e)),
+            exitCode: code,
+            totalEvents: events.length,
+          });
+        }
+        return;
+      }
 
       // Process remaining buffer
       if (buffer.trim()) {
@@ -223,6 +275,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     child.on('error', (err) => {
       clearTimeout(timeoutHandle);
       untrackChild(child.pid);
+      if (resolved) return;
       reject(new Error(`Failed to spawn gemini: ${err.message}`));
     });
 

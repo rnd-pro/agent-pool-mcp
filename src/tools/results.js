@@ -1,11 +1,13 @@
 /**
- * Task result store — tracks task status and retrieves results.
- * Includes coaching hints to encourage parallel work during polling.
+ * Task result store — tracks task status, PID, and retrieves results.
+ * Supports soft timeout (task continues after timeout), cancel, and post-timeout updates.
  *
  * @module agent-pool/tools/results
  */
 
-/** @type {Map<string, {status: string, prompt: string, result: object|null, error: string|null, startedAt: number, pollCount: number, waitHint: string|null}>} */
+import { killGroup } from '../runner/process-manager.js';
+
+/** @type {Map<string, {status: string, prompt: string, result: object|null, error: string|null, startedAt: number, pollCount: number, waitHint: string|null, pid: number|null}>} */
 const taskStore = new Map();
 
 // Coaching hints — nudge the agent to think about delegation
@@ -36,7 +38,33 @@ export function createTask(taskId, prompt, waitHint) {
     startedAt: Date.now(),
     pollCount: 0,
     waitHint: waitHint ?? null,
+    pid: null,
+    liveEvents: [],
   });
+}
+
+/**
+ * Push a live event to a running task (for progress tracking).
+ *
+ * @param {string} taskId
+ * @param {object} event - Parsed stream-json event
+ */
+export function pushTaskEvent(taskId, event) {
+  const entry = taskStore.get(taskId);
+  if (entry && entry.status === 'running') {
+    entry.liveEvents.push(event);
+  }
+}
+
+/**
+ * Associate a PID with a task (called after spawn).
+ *
+ * @param {string} taskId
+ * @param {number} pid
+ */
+export function setTaskPid(taskId, pid) {
+  const entry = taskStore.get(taskId);
+  if (entry) entry.pid = pid;
 }
 
 /**
@@ -50,6 +78,22 @@ export function completeTask(taskId, result) {
   if (entry) {
     entry.status = 'done';
     entry.result = result;
+    entry.pid = null;
+  }
+}
+
+/**
+ * Update a task that already resolved via soft timeout with final complete data.
+ * Only updates if the task is already 'done' with softTimeout flag.
+ *
+ * @param {string} taskId
+ * @param {object} result - Full result from process completion
+ */
+export function updateTaskResult(taskId, result) {
+  const entry = taskStore.get(taskId);
+  if (entry && entry.status === 'done' && entry.result?.softTimeout) {
+    entry.result = result;
+    entry.pid = null;
   }
 }
 
@@ -64,7 +108,45 @@ export function failTask(taskId, errorMessage) {
   if (entry) {
     entry.status = 'error';
     entry.error = errorMessage;
+    entry.pid = null;
   }
+}
+
+/**
+ * Cancel a running task — kill its process and mark as cancelled.
+ *
+ * @param {string} taskId
+ * @returns {{content: Array<{type: string, text: string}>, isError?: boolean}}
+ */
+export function cancelTask(taskId) {
+  const entry = taskStore.get(taskId);
+  if (!entry) {
+    return {
+      content: [{ type: 'text', text: `❌ Task not found: \`${taskId}\`` }],
+      isError: true,
+    };
+  }
+
+  if (entry.status !== 'running') {
+    return {
+      content: [{ type: 'text', text: `⚠️ Task \`${taskId.substring(0, 8)}\` is already ${entry.status}, cannot cancel.` }],
+    };
+  }
+
+  const elapsed = ((Date.now() - entry.startedAt) / 1000).toFixed(0);
+  let killed = false;
+  if (entry.pid) {
+    killed = killGroup(entry.pid);
+  }
+  entry.status = 'cancelled';
+  entry.pid = null;
+
+  return {
+    content: [{
+      type: 'text',
+      text: `🛑 Task \`${taskId.substring(0, 8)}\` cancelled after ${elapsed}s.${killed ? ' Process killed.' : ''}`,
+    }],
+  };
 }
 
 /**
@@ -84,6 +166,23 @@ export function getTask(taskId) {
  */
 export function removeTask(taskId) {
   taskStore.delete(taskId);
+}
+
+/**
+ * Get summary of all active tasks for inclusion in tool responses.
+ *
+ * @returns {string|null} Formatted active tasks string, or null if none
+ */
+export function getActiveTasks() {
+  const active = [...taskStore.entries()]
+    .filter(([, entry]) => entry.status === 'running')
+    .map(([id, entry]) => {
+      const elapsed = ((Date.now() - entry.startedAt) / 1000).toFixed(0);
+      const pidInfo = entry.pid ? ` pid:${entry.pid}` : '';
+      return `- \`${id.substring(0, 8)}\` (${elapsed}s${pidInfo}) ${entry.prompt.substring(0, 60)}...`;
+    });
+  if (active.length === 0) return null;
+  return `\n\n---\n📋 **Active tasks (${active.length})**:\n${active.join('\n')}`;
 }
 
 /**
@@ -111,11 +210,65 @@ export function formatTaskResult(taskId) {
       ? entry.waitHint
       : COACHING_HINTS[(entry.pollCount - 1) % COACHING_HINTS.length];
 
+    // Build progress from live events
+    let progress = '';
+    if (entry.liveEvents.length > 0) {
+      const tools = entry.liveEvents.filter((e) => e.type === 'tool_use');
+      const results = entry.liveEvents.filter((e) => e.type === 'tool_result');
+      const messages = entry.liveEvents.filter((e) => e.type === 'message' && e.role === 'assistant');
+      const parts = [];
+
+      // Show last 3 tools with key args
+      if (tools.length > 0) {
+        const toolLines = tools.slice(-3).map((t) => {
+          const name = t.tool_name ?? t.name ?? '?';
+          const args = t.parameters ?? t.arguments ?? {};
+          // Extract the most meaningful arg (path, file, query, symbol)
+          const detail = args.path ?? args.file ?? args.query ?? args.symbol ?? args.command ?? '';
+          const shortDetail = typeof detail === 'string' && detail.length > 0
+            ? ` → ${detail.length > 60 ? '…' + detail.slice(-55) : detail}`
+            : '';
+          return `  \`${name}\`${shortDetail}`;
+        });
+        parts.push(`🔧 Tools (${tools.length}):\n${toolLines.join('\n')}`);
+      }
+
+      // Show timing: gap between last tool_use and its tool_result  
+      if (tools.length > 0 && results.length > 0) {
+        const lastToolIdx = entry.liveEvents.lastIndexOf(tools[tools.length - 1]);
+        const lastResultIdx = entry.liveEvents.lastIndexOf(results[results.length - 1]);
+        if (lastResultIdx > lastToolIdx) {
+          // Both have timestamps or we estimate from event indices
+          const toolCount = results.length;
+          const totalElapsed = (Date.now() - entry.startedAt) / 1000;
+          parts.push(`⏱️ Avg ${(totalElapsed / Math.max(toolCount, 1)).toFixed(0)}s/tool`);
+        }
+      }
+
+      if (messages.length > 0) {
+        const lastMsg = messages[messages.length - 1];
+        const text = (lastMsg.content ?? lastMsg.text ?? '').substring(0, 120);
+        if (text) parts.push(`💬 ${text}`);
+      }
+      if (parts.length > 0) {
+        progress = `\n\n**Progress:**\n${parts.join('\n')}`;
+      }
+    } else if (parseInt(elapsed) > 10) {
+      progress = '\n\n⏳ *Cold start — Gemini CLI initialization takes ~15-20s*';
+    }
+
     return {
       content: [{
         type: 'text',
-        text: `⏳ Task is still running (${elapsed}s elapsed).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n\n💡 **${hint}**\n\nCheck again later with \`get_task_result\`.`,
+        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...${progress}\n\n💡 **${hint}**\n\nCheck again later with \`get_task_result\`.`,
       }],
+    };
+  }
+
+  if (entry.status === 'cancelled') {
+    removeTask(taskId);
+    return {
+      content: [{ type: 'text', text: `🛑 Task was cancelled.` }],
     };
   }
 
@@ -129,9 +282,18 @@ export function formatTaskResult(taskId) {
 
   // Done — format result
   const result = entry.result;
-  removeTask(taskId);
+  // Don't remove soft-timeout tasks — process is still running, updateTaskResult will update later
+  if (!result.softTimeout) {
+    removeTask(taskId);
+  }
 
   const sections = [];
+
+  // Soft timeout indicator
+  if (result.softTimeout) {
+    sections.push(`> ⏳ **Soft timeout** reached after ${result.timeoutSeconds}s. Process may still be running — partial result below.`);
+  }
+
   if (result.response) {
     sections.push(`## Agent Response\n\n${result.response}`);
   }
@@ -151,7 +313,9 @@ export function formatTaskResult(taskId) {
     if (s.total_tokens) statParts.push(`- Tokens: ${s.total_tokens} total`);
     if (s.duration_ms) statParts.push(`- Duration: ${(s.duration_ms / 1000).toFixed(1)}s`);
   }
-  statParts.push(`- Exit code: ${result.exitCode}`);
+  if (result.exitCode !== null && result.exitCode !== undefined) {
+    statParts.push(`- Exit code: ${result.exitCode}`);
+  }
   sections.push(`## Stats\n\n${statParts.join('\n')}`);
 
   return {
