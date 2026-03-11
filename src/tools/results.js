@@ -5,7 +5,7 @@
  * @module agent-pool/tools/results
  */
 
-import { killGroup } from '../runner/process-manager.js';
+import { killGroup, getSystemLoad } from '../runner/process-manager.js';
 
 /** @type {Map<string, {status: string, prompt: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null}>} */
 const taskStore = new Map();
@@ -279,10 +279,14 @@ export function formatTaskResult(taskId) {
       progress = '\n\n⏳ *Cold start — Gemini CLI initialization takes ~15-20s*';
     }
 
+    // System load awareness during polling
+    const load = getSystemLoad();
+    const loadInfo = load.warning ? `\n\n${load.warning}` : '';
+
     return {
       content: [{
         type: 'text',
-        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...${progress}\n\n💡 **${hint}**\n\nCheck again later with \`get_task_result\`.`,
+        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...${progress}\n\n💡 **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
       }],
     };
   }

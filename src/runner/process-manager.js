@@ -7,6 +7,8 @@
  * @module agent-pool/runner/process-manager
  */
 
+import { execSync } from 'node:child_process';
+
 /** @type {Map<number, {taskId: string, startTime: number, label: string}>} */
 const children = new Map();
 
@@ -81,6 +83,34 @@ export function killAll() {
  */
 export function listChildren() {
   return [...children.entries()].map(([pid, info]) => ({ pid, ...info }));
+}
+
+/**
+ * Get system-wide Gemini process load.
+ * Counts all `gemini` processes on the system, separating ours from external.
+ *
+ * @returns {{total: number, ours: number, external: number, warning: string|null}}
+ */
+export function getSystemLoad() {
+  let total = 0;
+  try {
+    const out = execSync('pgrep -f "gemini.*-p" 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    if (out) {
+      total = out.split('\n').filter(Boolean).length;
+    }
+  } catch {
+    // pgrep not available or failed
+  }
+
+  const ours = children.size;
+  const external = Math.max(0, total - ours);
+
+  let warning = null;
+  if (external > 0) {
+    warning = `⚠️ System load: ${external} other Gemini process${external > 1 ? 'es' : ''} running — responses may be slower.`;
+  }
+
+  return { total, ours, external, warning };
 }
 
 // Cleanup on exit signals
