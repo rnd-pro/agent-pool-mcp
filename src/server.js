@@ -13,6 +13,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
+import { getSystemLoad } from './runner/process-manager.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, cancelTask } from './tools/results.js';
 import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
@@ -152,10 +153,14 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   const skillInfo = args.skill ? `\n- **Skill**: ${args.skill}` : '';
   const policyInfo = policyPath ? `\n- **Policy**: ${policyPath}` : '';
 
+  // System load awareness
+  const load = getSystemLoad();
+  const loadInfo = load.warning ? `\n\n${load.warning}` : '';
+
   return {
     content: [{
       type: 'text',
-      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...${loadInfo}\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
