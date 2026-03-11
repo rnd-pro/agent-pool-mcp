@@ -218,3 +218,45 @@ export function installSkill(cwd, skillName) {
 
   return null;
 }
+
+/**
+ * Provision a skill for a delegated task.
+ * Copies the skill from global/built-in into the project's .gemini/skills/
+ * so Gemini CLI can activate it natively via activate_skill tool.
+ *
+ * If the skill is already in the project tier, does nothing.
+ *
+ * @param {string} cwd - Project root
+ * @param {string} skillName - Skill name
+ * @returns {{name: string, provisioned: boolean, tier: string} | null}
+ */
+export function provisionSkill(cwd, skillName) {
+  const fileName = skillName.endsWith('.md') ? skillName : `${skillName}.md`;
+  const canonicalName = skillName.replace('.md', '');
+
+  // Check if already in project
+  const projectPath = path.join(getProjectSkillsDir(cwd), fileName);
+  if (fs.existsSync(projectPath)) {
+    return { name: canonicalName, provisioned: false, tier: 'project' };
+  }
+
+  // Search global and built-in
+  const dirs = [
+    { dir: USER_GLOBAL_SKILLS_DIR, tier: 'global' },
+    { dir: BUILTIN_SKILLS_DIR, tier: 'built-in' },
+  ];
+
+  for (const { dir, tier } of dirs) {
+    const sourcePath = path.join(dir, fileName);
+    if (fs.existsSync(sourcePath)) {
+      const projectDir = getProjectSkillsDir(cwd);
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      // Copy to project for native Gemini CLI discovery
+      fs.copyFileSync(sourcePath, projectPath);
+      return { name: canonicalName, provisioned: true, tier };
+    }
+  }
+
+  return null;
+}

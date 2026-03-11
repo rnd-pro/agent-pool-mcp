@@ -1,0 +1,7 @@
+# Safe-edit policy — allows file edits but denies shell commands
+# Use with delegate_task(policy: "safe-edit") for code-only tasks
+
+- rule: ALWAYS deny
+  tool: run_shell_command
+- rule: ALWAYS deny
+  tool: delete_file

@@ -1,0 +1,13 @@
+# Read-only policy — prevents file modifications
+# Use with delegate_task(policy: "read-only") for safe analysis tasks
+
+- rule: ALWAYS deny
+  tool: write_file
+- rule: ALWAYS deny
+  tool: edit_file
+- rule: ALWAYS deny
+  tool: replace_file
+- rule: ALWAYS deny
+  tool: delete_file
+- rule: ALWAYS deny
+  tool: run_shell_command
