@@ -33,59 +33,52 @@ When the primary agent and Gemini workers are **different foundation models** (e
 ## Features
 
 ### 🚀 Task Delegation
-- **`delegate_task`** — Non-blocking task delegation to Gemini CLI (full filesystem access)
-- **`delegate_task_readonly`** — Read-only analysis (plan mode, no destructive actions)
-- **`get_task_result`** — Poll task status and retrieve results
+- **`delegate_task`** — Non-blocking task delegation to Gemini CLI (full filesystem access).
+- **`delegate_task_readonly`** — Read-only analysis (plan mode). Supports `session_id` to resume previous analyses.
+- **`get_task_result`** — Poll task status, retrieve results, and see live progress (last 200 tool/message events).
+- **`cancel_task`** — Kill a running task and its entire process group immediately.
+
+### 📋 3-Tier Skill System
+Skills are Markdown files with YAML frontmatter that extend agent behavior. Agent-pool manages skills in three tiers:
+1.  **Project**: `.gemini/skills/` (local to repo, takes precedence).
+2.  **Global**: `~/.gemini/skills/` (available across all projects).
+3.  **Built-in**: Shipped with agent-pool (e.g., `code-reviewer`, `test-writer`, `doc-fixer`).
+
+**Skill Tools:**
+- **`list_skills`** — See all available skills and their tiers.
+- **`install_skill`** — Copy a global or built-in skill to the project tier for local customization.
+- **`create_skill` / `delete_skill`** — Manage skill files in project or global scope.
+
+*Note: When delegating with a skill, agent-pool uses "hybrid activation" — it ensures the skill is available in the project and instructs Gemini CLI to activate it natively.*
+
+### 🛡️ Per-Task Policies
+Restrict tool usage for specific tasks using YAML policies. Use built-in templates or custom paths:
+- `policy: "read-only"` — Disables all file-writing and destructive shell tools.
+- `policy: "safe-edit"` — Allows file modifications but blocks arbitrary shell execution.
+- `policy: "/path/to/my-policy.yaml"` — Use a custom security policy.
 
 ### 🤝 Cross-Model Peer Review
-- **`consult_peer`** — Architectural review with structured verdicts (AGREE / SUGGEST_CHANGES / DISAGREE)
-- Supports iterative rounds: propose → get feedback → revise → re-send until consensus
-- Cross-model consensus eliminates single-model blind spots
+- **`consult_peer`** — Architectural review with structured verdicts (AGREE / SUGGEST_CHANGES / DISAGREE).
+- Supports iterative rounds: propose → get feedback → revise → re-send until consensus.
 
+### 📊 System Awareness & Management
+- **System Load Detection**: Automatically detects other running Gemini processes on the system and warns if the worker pool is saturated.
+- **Session Management**: `list_sessions` allows resuming previous Gemini CLI conversations by UUID.
+
+## Remote Workers (SSH)
+
+Run workers on remote servers via SSH — same interface, transparent stdio forwarding.
+Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/config.json`:
+
+```json
+{
+  "runners": [
+    { "id": "local", "type": "local" },
+    { "id": "gpu", "type": "ssh", "host": "gpu-server", "cwd": "/home/dev/project" }
+  ],
+  "defaultRunner": "local"
+}
 ```
-┌──────────────────┐     consult_peer      ┌──────────────────┐
-│  Claude Opus 4   │ ──── proposal ──────▶ │  Gemini Pro      │
-│  (primary agent) │ ◀─── verdict ──────── │  (peer reviewer) │
-└──────────────────┘                       └──────────────────┘
-```
-
-### 📋 Session & Skill Management
-- **`list_sessions`** — Resume previous Gemini CLI conversations
-- **`list_skills` / `create_skill` / `delete_skill`** — Manage `.gemini/skills/*.md`
-
-### 🌐 Remote Workers (SSH)
-- Run workers on remote servers via SSH — same interface, transparent stdio forwarding
-- Remote PID tracking for reliable cleanup on timeout
-- Safe shell escaping for all arguments
-
-## MCP Ecosystem
-
-Agent-pool is designed to work alongside other MCP servers. The combination amplifies each tool's capabilities at **both levels** — the primary IDE agent and the delegated Gemini CLI workers.
-
-### Works with [Project Graph MCP](https://github.com/rnd-pro/project-graph-mcp)
-
-| Layer | agent-pool-mcp | project-graph-mcp |
-|-------|---------------|-------------------|
-| **Primary IDE agent** | Delegates tasks, consults peer | Navigates codebase, runs quality analysis |
-| **Gemini CLI workers** | Executes delegated tasks | Available as MCP tool inside Gemini CLI |
-
-**Typical workflow:**
-
-```
-1. Primary agent uses project-graph to understand codebase structure
-2. Primary agent uses consult_peer to validate architectural proposal
-3. Primary agent delegates implementation to Gemini CLI worker
-4. Gemini CLI worker uses project-graph to navigate code and verify quality
-5. Primary agent checks results with get_task_result
-```
-
-Both servers complement each other:
-- **project-graph-mcp** provides codebase context (10-50x compressed AST graphs, code quality metrics, test checklists)
-- **agent-pool-mcp** provides execution capacity (parallel workers, cross-model review, remote SSH runners)
-
-### Works with [Stitch MCP](https://github.com/nicenathapong/stitch-mcp)
-
-Use agent-pool to delegate Stitch-based UI generation to background workers while the primary agent handles integration.
 
 ## Installation
 
@@ -94,8 +87,6 @@ git clone https://github.com/rnd-pro/agent-pool-mcp.git
 cd agent-pool-mcp
 npm install
 ```
-
-## MCP Configuration
 
 ### Antigravity IDE
 
@@ -133,71 +124,50 @@ npm install
 claude mcp add agent-pool node /path/to/agent-pool-mcp/index.js
 ```
 
-## Remote Workers
+## MCP Ecosystem
 
-Run Gemini CLI on remote servers via SSH. The remote server needs only `gemini` CLI installed and authenticated.
+Agent-pool works alongside other MCP servers:
 
-Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/config.json`:
+| Layer | agent-pool-mcp | [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) |
+|-------|---------------|-------------------|
+| **Primary IDE agent** | Delegates tasks, consults peer | Navigates codebase, runs analysis |
+| **Gemini CLI workers** | Executes delegated tasks | Available as MCP tool inside Gemini CLI |
 
-```json
-{
-  "runners": [
-    { "id": "local", "type": "local" },
-    { "id": "gpu", "type": "ssh", "host": "gpu-server", "cwd": "/home/dev/project" }
-  ],
-  "defaultRunner": "local"
-}
-```
+## Security
 
-```javascript
-delegate_task({
-  prompt: 'Run performance benchmarks',
-  runner: 'gpu',
-});
-```
-
-SSH authentication is managed through `~/.ssh/config`. Recommended: enable [ControlMaster](https://man.openbsd.org/ssh_config#ControlMaster) for connection reuse.
-
-Keep remote repos in sync via Git before delegating:
-```bash
-ssh gpu-server 'cd /home/dev/project && git pull'
-```
-
-## Skills
-
-Skills are markdown files with YAML frontmatter that extend Gemini CLI agent behavior:
-
-```javascript
-delegate_task({
-  prompt: 'Review src/server.js for security issues',
-  skill: 'code-reviewer',
-});
-```
-
-See [`examples/`](examples/) for templates:
-- **[parallel-work.md](examples/parallel-work.md)** — Orchestration skill for the calling agent (delegation patterns, `consult_peer` protocol)
-- **[code-reviewer.md](examples/code-reviewer.md)** — Code review with structured verdicts
-- **[research-analyst.md](examples/research-analyst.md)** — Technical research with findings reports
+- **Path Traversal Protection**: All skill and policy operations are sanitized to prevent access outside designated directories.
+- **Process Isolation**: Tasks run as detached processes; `cancel_task` and server shutdown ensure no zombie processes remain by killing entire process groups.
+- **Credential Safety**: Uses your local Gemini CLI authentication; no keys are stored or transmitted by this server.
 
 ## Architecture
 
 ```
 index.js                    ← Entry point (stdio transport)
+policies/                   ← Tool restriction policies (YAML)
+├── read-only.yaml
+└── safe-edit.yaml
+skills/                     ← Built-in Gemini CLI skills (Markdown)
+├── code-reviewer.md
+├── doc-fixer.md
+└── test-writer.md
 src/
 ├── server.js               ← MCP server setup + tool routing
 ├── tool-definitions.js     ← Tool schemas (JSON Schema)
 ├── tools/
 │   ├── consult.js          ← Peer review via Gemini CLI
-│   ├── results.js          ← Task store + result formatting
-│   └── skills.js           ← Skill file management
+│   ├── results.js          ← Task store + result formatting (TTL cleanup, ring buffer)
+│   └── skills.js           ← 3-tier skill management (project/global/built-in)
 └── runner/
     ├── config.js           ← Runner config loader (local/SSH)
     ├── gemini-runner.js    ← Process spawning (streaming + headless)
-    ├── process-manager.js  ← PID tracking, process group kill
+    ├── process-manager.js  ← PID tracking, system load awareness, group kill
     └── ssh.js              ← Shell escaping, remote PID tracking
 ```
 
-**Process management:** Spawns with `detached: true`, kills entire process group (`kill -TERM -pid`) on timeout. Handles SIGTERM/SIGINT gracefully — all tracked child processes are terminated on server shutdown.
+**Process management:**
+- **Detached Spawn**: Workers are spawned in their own process groups.
+- **TTL Cleanup**: Completed task results are purged from memory after 10 minutes.
+- **Live Events**: Progress polling uses a ring buffer to show the latest activity without overwhelming context.
 
 ## Requirements
 
