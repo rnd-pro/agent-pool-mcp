@@ -214,42 +214,52 @@ export function formatTaskResult(taskId) {
     let progress = '';
     if (entry.liveEvents.length > 0) {
       const tools = entry.liveEvents.filter((e) => e.type === 'tool_use');
-      const results = entry.liveEvents.filter((e) => e.type === 'tool_result');
+      const toolResults = entry.liveEvents.filter((e) => e.type === 'tool_result');
       const messages = entry.liveEvents.filter((e) => e.type === 'message' && e.role === 'assistant');
       const parts = [];
 
-      // Show last 3 tools with key args
+      // Show last 3 tool calls with args and results
       if (tools.length > 0) {
         const toolLines = tools.slice(-3).map((t) => {
           const name = t.tool_name ?? t.name ?? '?';
           const args = t.parameters ?? t.arguments ?? {};
-          // Extract the most meaningful arg (path, file, query, symbol)
-          const detail = args.path ?? args.file ?? args.query ?? args.symbol ?? args.command ?? '';
+          // Extract the most meaningful arg — Gemini uses file_path, path, query, etc.
+          const detail = args.file_path ?? args.path ?? args.file ?? args.query ?? args.symbol ?? args.command ?? '';
           const shortDetail = typeof detail === 'string' && detail.length > 0
             ? ` → ${detail.length > 60 ? '…' + detail.slice(-55) : detail}`
             : '';
-          return `  \`${name}\`${shortDetail}`;
+
+          // Find matching tool_result by tool_id
+          let resultInfo = '';
+          if (t.tool_id) {
+            const result = toolResults.find((r) => r.tool_id === t.tool_id);
+            if (result) {
+              // Calculate duration from timestamps
+              if (t.timestamp && result.timestamp) {
+                const duration = ((new Date(result.timestamp) - new Date(t.timestamp)) / 1000).toFixed(1);
+                resultInfo += ` (${duration}s)`;
+              }
+              // Show brief result output
+              const output = result.output ?? '';
+              if (output && typeof output === 'string' && output.length > 0) {
+                resultInfo += ` ${result.status === 'success' ? '✓' : '✗'} ${output.substring(0, 60)}`;
+              }
+            } else {
+              resultInfo = ' ⏳ running...';
+            }
+          }
+          return `  \`${name}\`${shortDetail}${resultInfo}`;
         });
         parts.push(`🔧 Tools (${tools.length}):\n${toolLines.join('\n')}`);
       }
 
-      // Show timing: gap between last tool_use and its tool_result  
-      if (tools.length > 0 && results.length > 0) {
-        const lastToolIdx = entry.liveEvents.lastIndexOf(tools[tools.length - 1]);
-        const lastResultIdx = entry.liveEvents.lastIndexOf(results[results.length - 1]);
-        if (lastResultIdx > lastToolIdx) {
-          // Both have timestamps or we estimate from event indices
-          const toolCount = results.length;
-          const totalElapsed = (Date.now() - entry.startedAt) / 1000;
-          parts.push(`⏱️ Avg ${(totalElapsed / Math.max(toolCount, 1)).toFixed(0)}s/tool`);
-        }
-      }
-
+      // Show last assistant message (agent's thinking/conclusion)
       if (messages.length > 0) {
         const lastMsg = messages[messages.length - 1];
-        const text = (lastMsg.content ?? lastMsg.text ?? '').substring(0, 120);
+        const text = (lastMsg.content ?? lastMsg.text ?? '').substring(0, 150);
         if (text) parts.push(`💬 ${text}`);
       }
+
       if (parts.length > 0) {
         progress = `\n\n**Progress:**\n${parts.join('\n')}`;
       }
