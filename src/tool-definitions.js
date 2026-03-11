@@ -32,6 +32,7 @@ export const TOOL_DEFINITIONS = [
         session_id: { type: 'string', description: 'Resume an existing Gemini CLI session by its UUID. Use list_sessions to see available sessions.' },
         skill: { type: 'string', description: 'Activate a Gemini CLI skill by name before executing the task. Use list_skills to see available skills.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
+        policy: { type: 'string', description: 'Policy file for tool restrictions. Use built-in template name (e.g. "read-only", "safe-edit") or absolute path to .yaml policy file.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results. Guides the calling agent on what to do while waiting.' },
       },
       required: ['prompt'],

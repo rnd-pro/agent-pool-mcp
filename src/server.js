@@ -14,10 +14,16 @@ import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, cancelTask } from './tools/results.js';
-import { listSkills, findSkill, createSkill, deleteSkill, installSkill } from './tools/skills.js';
+import { listSkills, findSkill, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const defaultCwd = process.cwd();
 
@@ -94,27 +100,46 @@ export function createServer() {
  */
 function handleDelegate(args, { approvalMode, emoji, label }) {
   const taskId = randomUUID();
+  const cwd = args.cwd ?? defaultCwd;
   let prompt = args.prompt;
 
+  // Hybrid skill activation: provision to project, then instruct native activation
   if (args.skill) {
-    const cwd = args.cwd ?? defaultCwd;
-    const found = findSkill(cwd, args.skill);
-    if (found) {
-      prompt = `## Active Skill: ${args.skill} [${found.tier}]\n\nFollow these instructions:\n\n${found.content}\n\n---\n\n## Task\n\n${prompt}`;
+    const provisioned = provisionSkill(cwd, args.skill);
+    if (provisioned) {
+      prompt = `IMPORTANT: Before starting the task, activate the skill "${provisioned.name}" using the activate_skill tool. Then proceed with the task.\n\n${prompt}`;
     } else {
-      prompt = `NOTE: Skill '${args.skill}' was requested but not found in any tier (project, global, built-in). Proceed with the task.\n\n${prompt}`;
+      // Skill not found anywhere — fallback to prompt-injection with findSkill
+      const found = findSkill(cwd, args.skill);
+      if (found) {
+        prompt = `## Active Skill: ${args.skill} [${found.tier}]\n\nFollow these instructions:\n\n${found.content}\n\n---\n\n## Task\n\n${prompt}`;
+      } else {
+        prompt = `NOTE: Skill '${args.skill}' was requested but not found in any tier. Proceed with the task.\n\n${prompt}`;
+      }
+    }
+  }
+
+  // Resolve policy path (built-in templates or absolute path)
+  let policyPath = args.policy ?? null;
+  if (policyPath && !path.isAbsolute(policyPath)) {
+    const builtinPolicy = path.resolve(__dirname, '..', 'policies', policyPath);
+    if (fs.existsSync(builtinPolicy)) {
+      policyPath = builtinPolicy;
+    } else if (fs.existsSync(builtinPolicy + '.yaml')) {
+      policyPath = builtinPolicy + '.yaml';
     }
   }
 
   const taskOpts = {
     prompt,
-    cwd: args.cwd ?? defaultCwd,
+    cwd,
     model: args.model,
     approvalMode: args.approval_mode ?? approvalMode,
     timeout: args.timeout ?? DEFAULT_TIMEOUT_SEC,
     sessionId: args.session_id,
     taskId,
     runner: args.runner,
+    policy: policyPath,
   };
 
   createTask(taskId, args.prompt, args.on_wait_hint);
@@ -126,11 +151,12 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   const mode = args.approval_mode ?? approvalMode;
   const runnerInfo = args.runner ? `\n- **Runner**: ${args.runner}` : '';
   const skillInfo = args.skill ? `\n- **Skill**: ${args.skill}` : '';
+  const policyInfo = policyPath ? `\n- **Policy**: ${policyPath}` : '';
 
   return {
     content: [{
       type: 'text',
-      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
