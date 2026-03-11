@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, cancelTask } from './tools/results.js';
-import { listSkills, findSkill, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
+import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
@@ -109,24 +109,23 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     if (provisioned) {
       prompt = `IMPORTANT: Before starting the task, activate the skill "${provisioned.name}" using the activate_skill tool. Then proceed with the task.\n\n${prompt}`;
     } else {
-      // Skill not found anywhere — fallback to prompt-injection with findSkill
-      const found = findSkill(cwd, args.skill);
-      if (found) {
-        prompt = `## Active Skill: ${args.skill} [${found.tier}]\n\nFollow these instructions:\n\n${found.content}\n\n---\n\n## Task\n\n${prompt}`;
-      } else {
-        prompt = `NOTE: Skill '${args.skill}' was requested but not found in any tier. Proceed with the task.\n\n${prompt}`;
-      }
+      prompt = `NOTE: Skill '${args.skill}' was requested but not found in any tier (project, global, built-in). Proceed with the task.\n\n${prompt}`;
     }
   }
 
   // Resolve policy path (built-in templates or absolute path)
   let policyPath = args.policy ?? null;
   if (policyPath && !path.isAbsolute(policyPath)) {
-    const builtinPolicy = path.resolve(__dirname, '..', 'policies', policyPath);
-    if (fs.existsSync(builtinPolicy)) {
+    const policiesDir = path.resolve(__dirname, '..', 'policies');
+    let builtinPolicy = path.resolve(policiesDir, policyPath);
+    if (!fs.existsSync(builtinPolicy) && fs.existsSync(builtinPolicy + '.yaml')) {
+      builtinPolicy = builtinPolicy + '.yaml';
+    }
+    // Path traversal protection: ensure resolved path stays within policies/
+    if (builtinPolicy.startsWith(policiesDir) && fs.existsSync(builtinPolicy)) {
       policyPath = builtinPolicy;
-    } else if (fs.existsSync(builtinPolicy + '.yaml')) {
-      policyPath = builtinPolicy + '.yaml';
+    } else {
+      policyPath = null; // Invalid or traversal attempt — ignore
     }
   }
 

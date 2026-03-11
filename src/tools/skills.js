@@ -23,6 +23,25 @@ const BUILTIN_SKILLS_DIR = path.resolve(__dirname, '..', '..', 'skills');
 const USER_GLOBAL_SKILLS_DIR = path.join(os.homedir(), '.gemini', 'skills');
 
 /**
+ * Sanitize skill name to prevent path traversal.
+ * Rejects names containing path separators or traversal sequences.
+ *
+ * @param {string} name - Raw skill name
+ * @returns {string} Sanitized name
+ * @throws {Error} If name contains path traversal or is invalid
+ */
+function sanitizeSkillName(name) {
+  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) {
+    throw new Error(`Invalid skill name: '${name}' (must not contain path separators or '..')`);
+  }
+  const sanitized = path.basename(name);
+  if (!sanitized || sanitized === '.' || sanitized === '..') {
+    throw new Error(`Invalid skill name: '${name}'`);
+  }
+  return sanitized;
+}
+
+/**
  * Get the project-level skills directory.
  *
  * @param {string} cwd - Project root
@@ -39,7 +58,7 @@ function getProjectSkillsDir(cwd) {
  * @returns {{name: string, description: string, body: string}}
  */
 function parseFrontmatter(content) {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) return { name: '', description: '', body: content };
 
   const frontmatter = match[1];
@@ -66,7 +85,7 @@ function parseFrontmatter(content) {
 function readSkillsFromDir(dir, tier) {
   if (!fs.existsSync(dir)) return [];
 
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('.'));
   return files.map((fileName) => {
     const filePath = path.join(dir, fileName);
     const content = fs.readFileSync(filePath, 'utf-8');
@@ -109,7 +128,7 @@ export function listSkills(cwd) {
  * @returns {{filePath: string, content: string, tier: string} | null}
  */
 export function findSkill(cwd, skillName) {
-  const fileName = skillName.endsWith('.md') ? skillName : `${skillName}.md`;
+  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
 
   const dirs = [
     { dir: getProjectSkillsDir(cwd), tier: 'project' },
@@ -145,7 +164,7 @@ export function createSkill(cwd, skillName, description, instructions, scope = '
   const targetDir = scope === 'global' ? USER_GLOBAL_SKILLS_DIR : getProjectSkillsDir(cwd);
   fs.mkdirSync(targetDir, { recursive: true });
 
-  const fileName = skillName.endsWith('.md') ? skillName : `${skillName}.md`;
+  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
   const filePath = path.join(targetDir, fileName);
 
   const content = [
@@ -172,7 +191,7 @@ export function createSkill(cwd, skillName, description, instructions, scope = '
  */
 export function deleteSkill(cwd, skillName, scope = 'project') {
   const targetDir = scope === 'global' ? USER_GLOBAL_SKILLS_DIR : getProjectSkillsDir(cwd);
-  const fileName = skillName.endsWith('.md') ? skillName : `${skillName}.md`;
+  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
   const filePath = path.join(targetDir, fileName);
 
   if (!fs.existsSync(filePath)) return false;
@@ -189,7 +208,7 @@ export function deleteSkill(cwd, skillName, scope = 'project') {
  * @returns {{installed: boolean, from: string, to: string, tier: string} | null}
  */
 export function installSkill(cwd, skillName) {
-  const fileName = skillName.endsWith('.md') ? skillName : `${skillName}.md`;
+  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
 
   // Only search global and built-in (not project — that's where we're installing to)
   const dirs = [
@@ -231,7 +250,7 @@ export function installSkill(cwd, skillName) {
  * @returns {{name: string, provisioned: boolean, tier: string} | null}
  */
 export function provisionSkill(cwd, skillName) {
-  const fileName = skillName.endsWith('.md') ? skillName : `${skillName}.md`;
+  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
   const canonicalName = skillName.replace('.md', '');
 
   // Check if already in project

@@ -7,8 +7,14 @@
 
 import { killGroup } from '../runner/process-manager.js';
 
-/** @type {Map<string, {status: string, prompt: string, result: object|null, error: string|null, startedAt: number, pollCount: number, waitHint: string|null, pid: number|null}>} */
+/** @type {Map<string, {status: string, prompt: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null}>} */
 const taskStore = new Map();
+
+/** Max number of live events to keep per task (ring buffer) */
+const MAX_LIVE_EVENTS = 200;
+
+/** TTL for completed tasks in ms (10 minutes) */
+const TASK_TTL_MS = 10 * 60 * 1000;
 
 // Coaching hints — nudge the agent to think about delegation
 const COACHING_HINTS = [
@@ -36,6 +42,7 @@ export function createTask(taskId, prompt, waitHint) {
     result: null,
     error: null,
     startedAt: Date.now(),
+    completedAt: null,
     pollCount: 0,
     waitHint: waitHint ?? null,
     pid: null,
@@ -53,6 +60,10 @@ export function pushTaskEvent(taskId, event) {
   const entry = taskStore.get(taskId);
   if (entry && entry.status === 'running') {
     entry.liveEvents.push(event);
+    // Ring buffer: keep only the last MAX_LIVE_EVENTS
+    if (entry.liveEvents.length > MAX_LIVE_EVENTS) {
+      entry.liveEvents = entry.liveEvents.slice(-MAX_LIVE_EVENTS);
+    }
   }
 }
 
@@ -78,6 +89,7 @@ export function completeTask(taskId, result) {
   if (entry) {
     entry.status = 'done';
     entry.result = result;
+    entry.completedAt = Date.now();
     entry.pid = null;
   }
 }
@@ -332,3 +344,13 @@ export function formatTaskResult(taskId) {
     content: [{ type: 'text', text: sections.join('\n\n---\n\n') }],
   };
 }
+
+// TTL auto-cleanup: purge completed tasks that were never polled
+setInterval(() => {
+  const now = Date.now();
+  for (const [taskId, entry] of taskStore) {
+    if (entry.status !== 'running' && entry.completedAt && (now - entry.completedAt) > TASK_TTL_MS) {
+      taskStore.delete(taskId);
+    }
+  }
+}, 60_000).unref();
