@@ -94,9 +94,14 @@ export function listChildren() {
 export function getSystemLoad() {
   let total = 0;
   try {
-    const out = execSync('pgrep -f "gemini.*-p" 2>/dev/null || true', { encoding: 'utf-8' }).trim();
-    if (out) {
-      total = out.split('\n').filter(Boolean).length;
+    // Use the exact gemini binary path to avoid false positives
+    // (e.g. Chrome processes using .gemini/ profile directory)
+    const geminiPath = execSync('which gemini 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    if (geminiPath) {
+      const out = execSync(`pgrep -f "${geminiPath}" 2>/dev/null || true`, { encoding: 'utf-8' }).trim();
+      if (out) {
+        total = out.split('\n').filter(Boolean).length;
+      }
     }
   } catch {
     // pgrep not available or failed
