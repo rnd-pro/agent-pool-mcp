@@ -40,7 +40,7 @@ export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, s
     }
     args.push('-p', prompt);
     args.push(
-      '--output-format', rawOutput ? 'raw' : 'json',
+      '--output-format', rawOutput ? 'text' : 'json',
       '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
     );
     if (model) {
