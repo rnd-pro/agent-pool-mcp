@@ -42,8 +42,9 @@ export const TOOL_DEFINITIONS = [
     name: 'delegate_task_readonly',
     description: [
       'Delegate a read-only analysis task to Gemini CLI agent.',
-      'The agent runs in plan mode - it cannot modify files or run destructive commands.',
-      'Use this for code review, architecture analysis, finding bugs, etc.',
+      'The agent has full access to the filesystem and can read/write files, run shell commands, etc.',
+      'It is semantically identical to delegate_task but signals that the task is primarily for analysis.',
+      'Use this for code review, architecture analysis, finding bugs, writing reports, etc.',
       '',
       'Returns a task_id immediately (non-blocking). Use get_task_result to check status and retrieve the result.',
       '',

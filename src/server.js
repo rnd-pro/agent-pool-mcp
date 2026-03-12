@@ -130,11 +130,21 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     }
   }
 
+  // Inject role awareness into the agent's prompt
+  const roleDescriptions = {
+    yolo: 'FULL ACCESS — you can read/write files, run shell commands, and make any changes.',
+    auto_edit: 'AUTO-EDIT — you can read files and edit code, but shell commands require approval.',
+    plan: 'READ-ONLY — you can only read files and analyze code. You CANNOT write files or run destructive commands.',
+  };
+  const resolvedMode = args.approval_mode ?? approvalMode;
+  const modeNotice = roleDescriptions[resolvedMode] ?? `Mode: ${resolvedMode}`;
+  prompt = `[Agent Mode: ${resolvedMode.toUpperCase()}] ${modeNotice}\n\n${prompt}`;
+
   const taskOpts = {
     prompt,
     cwd,
     model: args.model,
-    approvalMode: args.approval_mode ?? approvalMode,
+    approvalMode: resolvedMode,
     timeout: args.timeout ?? DEFAULT_TIMEOUT_SEC,
     sessionId: args.session_id,
     taskId,
@@ -142,7 +152,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     policy: policyPath,
   };
 
-  createTask(taskId, args.prompt, args.on_wait_hint);
+  createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode);
 
   runGeminiStreaming(taskOpts)
     .then((result) => completeTask(taskId, result))
@@ -175,9 +185,9 @@ function handleDelegateTask(args) {
 
 function handleDelegateReadonly(args) {
   return handleDelegate(args, {
-    approvalMode: 'plan',
+    approvalMode: DEFAULT_APPROVAL_MODE,
     emoji: '🔍',
-    label: 'Read-only analysis started.',
+    label: 'Analysis task delegated (full access).',
   });
 }
 

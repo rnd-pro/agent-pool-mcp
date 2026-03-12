@@ -7,7 +7,7 @@
 
 import { killGroup, getSystemLoad } from '../runner/process-manager.js';
 
-/** @type {Map<string, {status: string, prompt: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null}>} */
+/** @type {Map<string, {status: string, prompt: string, approvalMode: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null}>} */
 const taskStore = new Map();
 
 /** Max number of live events to keep per task (ring buffer) */
@@ -34,11 +34,13 @@ const COACHING_HINTS = [
  * @param {string} taskId - Task UUID
  * @param {string} prompt - Task prompt
  * @param {string} [waitHint] - Custom coaching hint for polling
+ * @param {string} [approvalMode] - Approval mode (yolo, auto_edit, plan)
  */
-export function createTask(taskId, prompt, waitHint) {
+export function createTask(taskId, prompt, waitHint, approvalMode) {
   taskStore.set(taskId, {
     status: 'running',
     prompt,
+    approvalMode: approvalMode ?? 'unknown',
     result: null,
     error: null,
     startedAt: Date.now(),
@@ -283,10 +285,12 @@ export function formatTaskResult(taskId) {
     const load = getSystemLoad();
     const loadInfo = load.warning ? `\n\n${load.warning}` : '';
 
+    const modeLabel = entry.approvalMode === 'plan' ? '🔒 read-only' : entry.approvalMode === 'yolo' ? '✏️ full-access' : `⚙️ ${entry.approvalMode}`;
+
     return {
       content: [{
         type: 'text',
-        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...${progress}\n\n💡 **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
+        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}${progress}\n\n💡 **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
       }],
     };
   }
@@ -331,6 +335,7 @@ export function formatTaskResult(taskId) {
     sections.push(`## Errors\n\n${result.errors.join('\n')}`);
   }
   const statParts = [];
+  if (entry.approvalMode) statParts.push(`- Mode: ${entry.approvalMode}`);
   if (result.sessionId) statParts.push(`- Session ID: \`${result.sessionId}\``);
   if (result.stats) {
     const s = result.stats;
