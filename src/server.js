@@ -138,7 +138,15 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   };
   const resolvedMode = args.approval_mode ?? approvalMode;
   const modeNotice = roleDescriptions[resolvedMode] ?? `Mode: ${resolvedMode}`;
-  prompt = `[Agent Mode: ${resolvedMode.toUpperCase()}] ${modeNotice}\n\n${prompt}`;
+
+  // Build workspace scope awareness — tell the agent its sandbox boundaries upfront
+  const workspaceDirs = [cwd];
+  if (args.include_dirs?.length > 0) {
+    workspaceDirs.push(...args.include_dirs);
+  }
+  const scopeNotice = `[Workspace Scope] You have access to these directories:\n${workspaceDirs.map((d) => `  - ${d}`).join('\n')}\nIf you need files outside these paths, use shell commands (cat, find, ls) instead of file tools. Do NOT attempt list_directory or read_file on paths outside your workspace — they will be rejected by the sandbox.`;
+
+  prompt = `[Agent Mode: ${resolvedMode.toUpperCase()}] ${modeNotice}\n\n${scopeNotice}\n\n${prompt}`;
 
   const taskOpts = {
     prompt,
@@ -150,6 +158,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     taskId,
     runner: args.runner,
     policy: policyPath,
+    includeDirs: args.include_dirs,
   };
 
   createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode);

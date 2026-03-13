@@ -31,7 +31,7 @@ export { DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE, DEFAULT_MODEL };
  * @param {string} [options.taskId] - Task ID for tracking
  * @returns {Promise<object>} Parsed JSON response
  */
-export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, policy, rawOutput }) {
+export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, policy, rawOutput, includeDirs }) {
   return new Promise((resolve, reject) => {
     const args = [];
 
@@ -49,6 +49,11 @@ export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, s
     }
     if (policy) {
       args.push('--policy', policy);
+    }
+    if (includeDirs?.length > 0) {
+      for (const dir of includeDirs) {
+        args.push('--include-directories', dir);
+      }
     }
 
     const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
@@ -118,7 +123,7 @@ export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, s
  * @param {string} [options.taskId] - Task ID for tracking
  * @returns {Promise<object>} Collected events and final response
  */
-export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy }) {
+export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy, includeDirs }) {
   return new Promise((resolve, reject) => {
     const runner = getRunner(runnerId);
     const isRemote = runner.type === 'ssh';
@@ -138,6 +143,11 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     }
     if (policy) {
       args.push('--policy', policy);
+    }
+    if (includeDirs?.length > 0) {
+      for (const dir of includeDirs) {
+        args.push('--include-directories', dir);
+      }
     }
 
     const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
