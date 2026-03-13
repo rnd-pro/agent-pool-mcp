@@ -10,12 +10,13 @@ export const TOOL_DEFINITIONS = [
     name: 'delegate_task',
     description: [
       'Delegate a coding task to a Gemini CLI agent running in headless mode.',
-      'The agent has full access to the filesystem and can read/write files, run shell commands, etc.',
+      'The agent is sandboxed to `cwd` directory only. Use `include_dirs` to grant access to additional directories.',
       'Use this for parallel work: code review, testing, refactoring, analysis, or any dev task.',
       '',
       'Returns a task_id immediately (non-blocking). Use get_task_result to check status and retrieve the result.',
       '',
       'IMPORTANT: Gemini CLI cold start takes ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
+      'WORKSPACE: The agent can only use file tools within `cwd` and `include_dirs`. For other paths it can use shell commands (cat, find, ls).',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -43,13 +44,14 @@ export const TOOL_DEFINITIONS = [
     name: 'delegate_task_readonly',
     description: [
       'Delegate a read-only analysis task to Gemini CLI agent.',
-      'The agent has full access to the filesystem and can read/write files, run shell commands, etc.',
+      'The agent is sandboxed to `cwd` directory only. Use `include_dirs` to grant access to additional directories.',
       'It is semantically identical to delegate_task but signals that the task is primarily for analysis.',
       'Use this for code review, architecture analysis, finding bugs, writing reports, etc.',
       '',
       'Returns a task_id immediately (non-blocking). Use get_task_result to check status and retrieve the result.',
       '',
       'IMPORTANT: Gemini CLI cold start takes ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
+      'WORKSPACE: The agent can only use file tools within `cwd` and `include_dirs`. For other paths it can use shell commands (cat, find, ls).',
     ].join('\n'),
     inputSchema: {
       type: 'object',
