@@ -329,14 +329,26 @@ export function formatTaskResult(taskId) {
     sections.push(`> ⏳ **Soft timeout** reached after ${result.timeoutSeconds}s. Process may still be running — partial result below.`);
   }
 
+  // Agent failed with non-zero exit and no response — show diagnostic info
+  if (result.exitCode && result.exitCode !== 0 && !result.response) {
+    sections.push(`## ⚠️ Agent Failed (exit code ${result.exitCode})\n\nThe agent process terminated without producing a response.`);
+    if (result.toolCalls?.length > 0) {
+      const lastTools = result.toolCalls.slice(-5).map((t) => `- \`${t.name}\``).join('\n');
+      sections.push(`### Last Tool Calls\n\n${lastTools}`);
+    }
+    if (result.errors?.length > 0) {
+      sections.push(`### Errors\n\n${result.errors.join('\n')}`);
+    }
+  }
+
   if (result.response) {
     sections.push(`## Agent Response\n\n${result.response}`);
   }
-  if (result.toolCalls?.length > 0) {
+  if (result.toolCalls?.length > 0 && result.response) {
     const toolSummary = result.toolCalls.map((t) => `- **${t.name}**`).join('\n');
     sections.push(`## Tools Used (${result.toolCalls.length})\n\n${toolSummary}`);
   }
-  if (result.errors?.length > 0) {
+  if (result.errors?.length > 0 && result.response) {
     sections.push(`## Errors\n\n${result.errors.join('\n')}`);
   }
   const statParts = [];
