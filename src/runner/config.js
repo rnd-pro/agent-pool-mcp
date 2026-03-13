@@ -19,9 +19,13 @@ import { homedir } from 'node:os';
  * @property {string} [cwd] - Remote working directory (for type=ssh)
  */
 
+/** Default model for all delegated tasks */
+const DEFAULT_MODEL = 'gemini-3.1-pro-preview';
+
 const DEFAULT_CONFIG = {
   runners: [{ id: 'local', type: 'local' }],
   defaultRunner: 'local',
+  defaultModel: DEFAULT_MODEL,
 };
 
 /** @type {{runners: RunnerDef[], defaultRunner: string}|null} */
@@ -49,6 +53,7 @@ export function loadConfig() {
         cachedConfig = {
           runners: parsed.runners ?? DEFAULT_CONFIG.runners,
           defaultRunner: parsed.defaultRunner ?? 'local',
+          defaultModel: parsed.defaultModel ?? DEFAULT_MODEL,
         };
         console.error(`[agent-pool] Config loaded from ${filePath}`);
         return cachedConfig;
