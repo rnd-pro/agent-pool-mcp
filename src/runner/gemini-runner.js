@@ -8,7 +8,7 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
-import { getRunner } from './config.js';
+import { getRunner, loadConfig } from './config.js';
 import { buildSshSpawn, parseRemotePid, killRemoteProcess } from './ssh.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent } from '../tools/results.js';
 
@@ -43,8 +43,9 @@ export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, s
       '--output-format', rawOutput ? 'text' : 'json',
       '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
     );
-    if (model) {
-      args.push('--model', model);
+    const effectiveModel = model || loadConfig().defaultModel;
+    if (effectiveModel) {
+      args.push('--model', effectiveModel);
     }
     if (policy) {
       args.push('--policy', policy);
@@ -131,8 +132,9 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       '--output-format', 'stream-json',
       '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
     );
-    if (model) {
-      args.push('--model', model);
+    const effectiveModel = model || loadConfig().defaultModel;
+    if (effectiveModel) {
+      args.push('--model', effectiveModel);
     }
     if (policy) {
       args.push('--policy', policy);
