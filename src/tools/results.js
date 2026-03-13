@@ -239,9 +239,14 @@ export function formatTaskResult(taskId) {
           const args = t.parameters ?? t.arguments ?? {};
           // Extract the most meaningful arg — Gemini uses file_path, path, query, etc.
           const detail = args.file_path ?? args.path ?? args.file ?? args.query ?? args.symbol ?? args.command ?? '';
-          const shortDetail = typeof detail === 'string' && detail.length > 0
-            ? ` → ${detail.length > 60 ? '…' + detail.slice(-55) : detail}`
-            : '';
+          let shortDetail = '';
+          if (typeof detail === 'string' && detail.length > 0) {
+            // Absolute paths: always trim from start — the tail (project/file) matters most
+            const display = detail.startsWith('/') && detail.length > 30
+              ? '…' + detail.slice(-30)
+              : detail.length > 60 ? '…' + detail.slice(-55) : detail;
+            shortDetail = ` → ${display}`;
+          }
 
           // Find matching tool_result by tool_id
           let resultInfo = '';
