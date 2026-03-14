@@ -1,10 +1,13 @@
 /**
  * Peer consultation — consult_peer tool for architectural consensus.
+ * Non-blocking: returns task_id, result is polled via get_task_result.
  *
  * @module agent-pool/tools/consult
  */
 
-import { runGeminiHeadless } from '../runner/gemini-runner.js';
+import { randomUUID } from 'node:crypto';
+import { runGeminiStreaming } from '../runner/gemini-runner.js';
+import { createTask, completeTask, failTask } from './results.js';
 
 const PEER_REVIEW_SYSTEM_PROMPT = [
   'You are a senior software architect participating in a peer review session.',
@@ -36,7 +39,8 @@ const PEER_REVIEW_SYSTEM_PROMPT = [
 ].join('\n');
 
 /**
- * Consult a Gemini peer agent for architectural review.
+ * Consult a Gemini peer agent for architectural review (non-blocking).
+ * Spawns a streaming task and returns task_id immediately.
  *
  * @param {object} args
  * @param {string} args.context - Project context
@@ -45,9 +49,11 @@ const PEER_REVIEW_SYSTEM_PROMPT = [
  * @param {string} [args.cwd] - Working directory
  * @param {string} [args.model] - Model ID
  * @param {string} defaultCwd - Default working directory
- * @returns {Promise<{content: Array<{type: string, text: string}>}>}
+ * @returns {{content: Array<{type: string, text: string}>}}
  */
-export async function consultPeer(args, defaultCwd) {
+export function consultPeer(args, defaultCwd) {
+  const taskId = randomUUID();
+
   const parts = [
     PEER_REVIEW_SYSTEM_PROMPT,
     '',
@@ -69,22 +75,25 @@ export async function consultPeer(args, defaultCwd) {
     );
   }
 
-  const result = await runGeminiHeadless({
-    prompt: parts.join('\n'),
+  const prompt = parts.join('\n');
+
+  createTask(taskId, `[peer-review] ${args.proposal.substring(0, 100)}`, 'Peer is reviewing your proposal. Continue with other work while waiting.', 'plan');
+
+  runGeminiStreaming({
+    prompt,
     cwd: args.cwd ?? defaultCwd,
     model: args.model,
     approvalMode: 'plan',
-    timeout: 120,
-    taskId: 'peer-consult',
-    rawOutput: true,
-  });
-
-  const response = result.response ?? '';
+    timeout: 0, // no timeout — runs until completion
+    taskId,
+  })
+    .then((result) => completeTask(taskId, result))
+    .catch((err) => failTask(taskId, err.message));
 
   return {
     content: [{
       type: 'text',
-      text: response || '(no response from peer)',
+      text: `🤝 Peer consultation started.\n\n- **Task ID**: \`${taskId}\`\n- **Proposal**: ${args.proposal.substring(0, 120)}...\n\nUse \`get_task_result\` with this task_id to check the verdict.`,
     }],
   };
 }
