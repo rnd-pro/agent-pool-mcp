@@ -4,24 +4,36 @@
  * Agent Pool MCP Server — Entry Point
  *
  * Multi-agent task delegation and orchestration via Gemini CLI.
+ * Supports CLI modes: --check, --init, --version, --help.
  *
  * @module agent-pool
  */
 
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createServer } from './src/server.js';
+import { handleCli, validateStartup } from './src/cli.js';
 
-// Import process-manager to register SIGTERM/SIGINT handlers
-import './src/runner/process-manager.js';
+// CLI mode: --check, --init, --version, --help
+if (handleCli(process.argv)) {
+  // CLI command handled, don't start MCP server
+} else {
+  // MCP server mode
+  startServer();
+}
 
-async function main() {
+async function startServer() {
+  // Quick prerequisite check (< 50ms)
+  if (!validateStartup()) {
+    process.exit(1);
+  }
+
+  // Import MCP deps only when starting server
+  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+  const { createServer } = await import('./src/server.js');
+
+  // Register SIGTERM/SIGINT handlers for process cleanup
+  await import('./src/runner/process-manager.js');
+
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('[agent-pool] MCP server v1.0.0 started');
 }
-
-main().catch((err) => {
-  console.error('[agent-pool] Fatal error:', err);
-  process.exit(1);
-});

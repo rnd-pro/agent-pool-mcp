@@ -80,47 +80,19 @@ Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/co
 }
 ```
 
-## Installation
+## Prerequisites
 
-### Quick Start (npm)
-
-Install globally — no paths needed:
+- **Node.js >= 20** — [Download](https://nodejs.org)
+- **[Gemini CLI](https://github.com/google-gemini/gemini-cli)** — installed and authenticated:
 
 ```bash
-npm install -g agent-pool-mcp
+npm install -g @google/gemini-cli
+gemini    # First run: opens browser for OAuth
 ```
 
-### IDE Configuration
+## Installation
 
-#### Antigravity IDE
-
-`~/.gemini/antigravity/mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "agent-pool": {
-      "command": "agent-pool-mcp"
-    }
-  }
-}
-```
-
-#### Cursor / Windsurf
-
-`.cursor/mcp.json` or equivalent:
-
-```json
-{
-  "mcpServers": {
-    "agent-pool": {
-      "command": "agent-pool-mcp"
-    }
-  }
-}
-```
-
-Or use npx (zero-install):
+Add to your IDE's MCP configuration:
 
 ```json
 {
@@ -133,19 +105,46 @@ Or use npx (zero-install):
 }
 ```
 
-#### Claude Code
+Restart your IDE — agent-pool-mcp will be downloaded and started automatically.
+
+<details>
+<summary>📍 Where is my MCP config file?</summary>
+
+| IDE | Config path |
+|-----|------------|
+| Antigravity | `~/.gemini/antigravity/mcp_config.json` |
+| Cursor | `.cursor/mcp.json` |
+| Windsurf | `.windsurf/mcp.json` |
+| Claude Code | Run: `claude mcp add agent-pool npx -y agent-pool-mcp` |
+
+</details>
+
+<details>
+<summary>📦 Alternative: global install</summary>
 
 ```bash
-claude mcp add agent-pool agent-pool-mcp
+npm install -g agent-pool-mcp
 ```
 
-### From Source
+Then use `"command": "agent-pool-mcp"` in your MCP config (no npx needed).
+
+</details>
+
+### Verify
 
 ```bash
-git clone https://github.com/rnd-pro/agent-pool-mcp.git
-cd agent-pool-mcp
-npm install
-# Then use "node /path/to/agent-pool-mcp/index.js" as the command in your MCP config
+npx agent-pool-mcp --check
+```
+
+This runs diagnostics: checks Node.js, Gemini CLI, authentication, and remote runner connectivity.
+
+### CLI Commands
+
+```bash
+npx agent-pool-mcp --check      # Doctor mode: diagnose prerequisites
+npx agent-pool-mcp --init       # Create template config (for SSH runners)
+npx agent-pool-mcp --version    # Show version
+npx agent-pool-mcp --help       # Full help
 ```
 
 ## MCP Ecosystem
@@ -183,20 +182,17 @@ src/
 │   └── skills.js           ← 3-tier skill management (project/global/built-in)
 └── runner/
     ├── config.js           ← Runner config loader (local/SSH)
-    ├── gemini-runner.js    ← Process spawning (streaming + headless)
+    ├── gemini-runner.js    ← Process spawning (streaming JSON)
     ├── process-manager.js  ← PID tracking, system load awareness, group kill
     └── ssh.js              ← Shell escaping, remote PID tracking
+├── cli.js                  ← CLI commands (--check, --init, --help)
 ```
 
 **Process management:**
 - **Detached Spawn**: Workers are spawned in their own process groups.
 - **TTL Cleanup**: Completed task results are purged from memory after 10 minutes.
 - **Live Events**: Progress polling uses a ring buffer to show the latest activity without overwhelming context.
-
-## Requirements
-
-- Node.js >= 20
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) installed and authenticated
+- **Startup Validation**: Quick prerequisite check before MCP server starts; exits with clear error if Gemini CLI is missing.
 
 ## License
 
