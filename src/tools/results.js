@@ -16,6 +16,34 @@ const MAX_LIVE_EVENTS = 200;
 /** TTL for completed tasks in ms (10 minutes) */
 const TASK_TTL_MS = 10 * 60 * 1000;
 
+// ─── Error classification for retry hints ───────────────────
+
+/**
+ * Classify error text and return a retry hint for the calling agent.
+ * @param {string} errorText
+ * @returns {string} Retry instruction
+ */
+function classifyError(errorText) {
+  const lower = errorText.toLowerCase();
+
+  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('quota') || lower.includes('resource_exhausted')) {
+    return '🔄 **Rate limited.** Wait 30-60 seconds, then retry the same task with `delegate_task`.';
+  }
+  if (lower.includes('network') || lower.includes('econnrefused') || lower.includes('econnreset') || lower.includes('etimedout') || lower.includes('fetch failed') || lower.includes('socket hang up')) {
+    return '🔄 **Network error.** Check connectivity and retry the task. This is usually transient.';
+  }
+  if (lower.includes('401') || lower.includes('403') || lower.includes('unauthenticated') || lower.includes('permission denied') || lower.includes('not authenticated')) {
+    return '🔑 **Authentication error.** Run `gemini` in terminal to re-authenticate, then retry.';
+  }
+  if (lower.includes('enomem') || lower.includes('out of memory') || lower.includes('heap')) {
+    return '💾 **Out of memory.** Too many parallel workers. Cancel some tasks with `cancel_task`, then retry.';
+  }
+  if (lower.includes('spawn') || lower.includes('enoent')) {
+    return '⚙️ **Gemini CLI not found.** Install: `npm install -g @google/gemini-cli`';
+  }
+  return '🔄 **Unexpected error.** You can retry the task with `delegate_task`. If the error persists, try a simpler prompt or check `npx agent-pool-mcp --check`.';
+}
+
 // Coaching hints — nudge the agent to think about delegation
 const COACHING_HINTS = [
   'Think: what else can you do in parallel while this task runs? Delegate another task or work on something independent.',
@@ -310,9 +338,11 @@ export function formatTaskResult(taskId) {
   }
 
   if (entry.status === 'error') {
+    const errorText = entry.error ?? 'Unknown error';
+    const retryHint = classifyError(errorText);
     removeTask(taskId);
     return {
-      content: [{ type: 'text', text: `❌ Task failed: ${entry.error}` }],
+      content: [{ type: 'text', text: `❌ Task failed: ${errorText}\n\n${retryHint}` }],
       isError: true,
     };
   }
@@ -341,6 +371,8 @@ export function formatTaskResult(taskId) {
     if (result.errors?.length > 0) {
       sections.push(`### Errors\n\n${result.errors.join('\n')}`);
     }
+    const errorSignal = (result.errors ?? []).join(' ');
+    sections.push(`### Recovery\n\n${classifyError(errorSignal || `exit code ${result.exitCode}`)}`);
   }
 
   if (result.response) {
