@@ -82,13 +82,17 @@ Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/co
 
 ## Installation
 
+### Quick Start (npm)
+
+Install globally — no paths needed:
+
 ```bash
-git clone https://github.com/rnd-pro/agent-pool-mcp.git
-cd agent-pool-mcp
-npm install
+npm install -g agent-pool-mcp
 ```
 
-### Antigravity IDE
+### IDE Configuration
+
+#### Antigravity IDE
 
 `~/.gemini/antigravity/mcp_config.json`:
 
@@ -96,14 +100,13 @@ npm install
 {
   "mcpServers": {
     "agent-pool": {
-      "command": "node",
-      "args": ["/path/to/agent-pool-mcp/index.js"]
+      "command": "agent-pool-mcp"
     }
   }
 }
 ```
 
-### Cursor / Windsurf
+#### Cursor / Windsurf
 
 `.cursor/mcp.json` or equivalent:
 
@@ -111,17 +114,38 @@ npm install
 {
   "mcpServers": {
     "agent-pool": {
-      "command": "node",
-      "args": ["/path/to/agent-pool-mcp/index.js"]
+      "command": "agent-pool-mcp"
     }
   }
 }
 ```
 
-### Claude Code
+Or use npx (zero-install):
+
+```json
+{
+  "mcpServers": {
+    "agent-pool": {
+      "command": "npx",
+      "args": ["-y", "agent-pool-mcp"]
+    }
+  }
+}
+```
+
+#### Claude Code
 
 ```bash
-claude mcp add agent-pool node /path/to/agent-pool-mcp/index.js
+claude mcp add agent-pool agent-pool-mcp
+```
+
+### From Source
+
+```bash
+git clone https://github.com/rnd-pro/agent-pool-mcp.git
+cd agent-pool-mcp
+npm install
+# Then use "node /path/to/agent-pool-mcp/index.js" as the command in your MCP config
 ```
 
 ## MCP Ecosystem
