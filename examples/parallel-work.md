@@ -143,6 +143,61 @@ consult_peer({
 
 **The consultation phase is part of the work, not overhead. Skipping it to "save time" creates rework.**
 
+## Nested Orchestration
+
+Agent-pool can be installed inside Gemini CLI workers, enabling **hierarchical delegation** — workers can delegate their own sub-tasks.
+
+### Setup
+
+Add agent-pool as MCP server in Gemini CLI config (`~/.gemini/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "agent-pool": {
+      "command": "npx",
+      "args": ["-y", "agent-pool-mcp"]
+    }
+  }
+}
+```
+
+### Depth Tracking
+
+Agent-pool automatically tracks nesting depth via environment variables:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `AGENT_POOL_DEPTH` | Current nesting level (auto-incremented) | `0` |
+| `AGENT_POOL_MAX_DEPTH` | Max allowed depth (optional limit) | not set (no limit) |
+
+To enable depth limit:
+```json
+{
+  "mcpServers": {
+    "agent-pool": {
+      "command": "npx",
+      "args": ["-y", "agent-pool-mcp"],
+      "env": { "AGENT_POOL_MAX_DEPTH": "2" }
+    }
+  }
+}
+```
+
+When depth limit is reached, delegation tools return an error instructing the agent to execute directly.
+
+### Use Cases
+
+- **Multi-repo refactoring**: top-level delegates per-repo, each repo's worker sub-delegates per-file
+- **Architecture decomposition**: research phase → plan phase → parallel implementation per module
+- **Deep review pipelines**: security review, performance review, architecture review — each with sub-analysis
+
+### Safety Rules
+
+- Start with `AGENT_POOL_MAX_DEPTH=2` until you understand resource usage
+- Each Gemini CLI process uses ~200-500 MB RAM
+- Use `orchestrator` skill (`--skill orchestrator`) for workers that should sub-delegate
+
 ## Anti-Patterns
 
 ❌ Both agents editing the same file  
@@ -154,3 +209,4 @@ consult_peer({
 ❌ Starting implementation before agent research completes  
 ❌ Skipping `consult_peer` for architectural decisions  
 ❌ Substituting agent research with web search fallback  
+❌ Nested delegation without `AGENT_POOL_MAX_DEPTH` on untrusted prompts  
