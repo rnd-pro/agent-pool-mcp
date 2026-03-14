@@ -122,6 +122,7 @@ export function failTask(taskId, errorMessage) {
   if (entry) {
     entry.status = 'error';
     entry.error = errorMessage;
+    entry.completedAt = Date.now();
     entry.pid = null;
   }
 }
@@ -153,6 +154,7 @@ export function cancelTask(taskId) {
     killed = killGroup(entry.pid);
   }
   entry.status = 'cancelled';
+  entry.completedAt = Date.now();
   entry.pid = null;
 
   return {
