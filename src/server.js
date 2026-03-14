@@ -65,6 +65,32 @@ const GEMINI_TOOLS = new Set([
   'delegate_task', 'delegate_task_readonly', 'consult_peer', 'list_sessions',
 ]);
 
+// ─── Depth tracking (for nested orchestration) ──────────────
+
+const CURRENT_DEPTH = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
+const MAX_DEPTH = process.env.AGENT_POOL_MAX_DEPTH
+  ? parseInt(process.env.AGENT_POOL_MAX_DEPTH)
+  : null; // null = no limit (disabled by default)
+
+function isDepthExceeded() {
+  return MAX_DEPTH !== null && CURRENT_DEPTH >= MAX_DEPTH;
+}
+
+const DEPTH_EXCEEDED_ERROR = {
+  content: [{
+    type: 'text',
+    text: `⚠️ Orchestration depth limit reached (depth=${CURRENT_DEPTH}, max=${MAX_DEPTH}).
+
+This agent-pool instance is running inside a nested Gemini CLI worker.
+Delegation is disabled at this depth to prevent runaway process spawning.
+
+Execute the task directly instead of delegating it.
+
+To increase the limit, set AGENT_POOL_MAX_DEPTH to a higher value.`
+  }],
+  isError: true,
+};
+
 /**
  * Create and configure the MCP server.
  *
@@ -73,6 +99,10 @@ const GEMINI_TOOLS = new Set([
 export function createServer() {
   // Check gemini once at server creation
   checkGemini();
+
+  if (CURRENT_DEPTH > 0) {
+    console.error(`[agent-pool] Nested orchestration: depth=${CURRENT_DEPTH}${MAX_DEPTH !== null ? `, max=${MAX_DEPTH}` : ''}`);
+  }
 
   const server = new Server(
     { name: 'agent-pool', version: '1.0.0' },
@@ -87,8 +117,9 @@ export function createServer() {
     const { name, arguments: args } = request.params;
 
     // Guard: tools that need gemini
-    if (GEMINI_TOOLS.has(name) && !checkGemini()) {
-      return GEMINI_REQUIRED_ERROR;
+    if (GEMINI_TOOLS.has(name)) {
+      if (!checkGemini()) return GEMINI_REQUIRED_ERROR;
+      if (isDepthExceeded()) return DEPTH_EXCEEDED_ERROR;
     }
 
     let response;
