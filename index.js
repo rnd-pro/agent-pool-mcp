@@ -20,10 +20,8 @@ if (handleCli(process.argv)) {
 }
 
 async function startServer() {
-  // Quick prerequisite check (< 50ms)
-  if (!validateStartup()) {
-    process.exit(1);
-  }
+  // Warn if prerequisites are missing (don't exit — let the agent handle it)
+  validateStartup();
 
   // Import MCP deps only when starting server
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
@@ -37,3 +35,4 @@ async function startServer() {
   await server.connect(transport);
   console.error('[agent-pool] MCP server v1.0.0 started');
 }
+
