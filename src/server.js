@@ -58,7 +58,7 @@ export function createServer() {
         case 'cancel_task':
           response = cancelTask(args.task_id); break;
         case 'consult_peer':
-          response = await consultPeer(args, defaultCwd); break;
+          response = consultPeer(args, defaultCwd); break;
         case 'list_sessions':
           response = await handleListSessions(args); break;
         case 'list_skills':

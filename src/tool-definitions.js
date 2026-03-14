@@ -75,7 +75,10 @@ export const TOOL_DEFINITIONS = [
       'Use during PLANNING phase to validate proposals before implementation.',
       'Supports iterative rounds: send proposal, get feedback, revise, resend until AGREE.',
       'The peer responds with a structured verdict: AGREE, SUGGEST_CHANGES, or DISAGREE.',
-    ].join(' '),
+      '',
+      'Returns a task_id immediately (non-blocking). Use get_task_result to check the verdict.',
+      'The peer runs without a timeout — it will work until done. Progress is visible via get_task_result.',
+    ].join('\n'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,11 +93,11 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'get_task_result',
-    description: 'Check the status and result of a background task started with delegate_task or delegate_task_readonly. Returns status: running, done, or error.',
+    description: 'Check the status and result of a background task started with delegate_task, delegate_task_readonly, or consult_peer. Returns status: running, done, or error.',
     inputSchema: {
       type: 'object',
       properties: {
-        task_id: { type: 'string', description: 'Task ID returned by delegate_task or delegate_task_readonly.' },
+        task_id: { type: 'string', description: 'Task ID returned by delegate_task, delegate_task_readonly, or consult_peer.' },
       },
       required: ['task_id'],
     },
