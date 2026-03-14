@@ -160,12 +160,29 @@ npx agent-pool-mcp --help       # Full help
 
 ## MCP Ecosystem
 
-Agent-pool works alongside other MCP servers:
+Best used together with [**project-graph-mcp**](https://www.npmjs.com/package/project-graph-mcp) — AST-based codebase analysis:
 
-| Layer | agent-pool-mcp | [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) |
+| Layer | agent-pool-mcp | project-graph-mcp |
 |-------|---------------|-------------------|
 | **Primary IDE agent** | Delegates tasks, consults peer | Navigates codebase, runs analysis |
-| **Gemini CLI workers** | Executes delegated tasks | Available as MCP tool inside Gemini CLI |
+| **Gemini CLI workers** | Executes delegated tasks | Available as MCP tool inside workers |
+
+Combined config for both:
+
+```json
+{
+  "mcpServers": {
+    "agent-pool": {
+      "command": "npx",
+      "args": ["-y", "agent-pool-mcp"]
+    },
+    "project-graph": {
+      "command": "npx",
+      "args": ["-y", "project-graph-mcp"]
+    }
+  }
+}
+```
 
 ## Security
 
