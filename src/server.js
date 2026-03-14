@@ -35,7 +35,7 @@ const defaultCwd = process.cwd();
  */
 export function createServer() {
   const server = new Server(
-    { name: 'agent-pool', version: '3.1.0' },
+    { name: 'agent-pool', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
 
