@@ -33,6 +33,6 @@ async function startServer() {
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[agent-pool] MCP server v1.0.0 started');
+  console.error('[agent-pool] MCP server v1.0.1 started');
 }
 
