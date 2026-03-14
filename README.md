@@ -80,6 +80,17 @@ Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/co
 }
 ```
 
+## Nested Orchestration
+
+Install agent-pool inside Gemini CLI to enable **hierarchical delegation** — workers can spawn their own workers.
+
+| Variable | Purpose | Default |
+|----------|---------|--------|
+| `AGENT_POOL_DEPTH` | Current nesting level (auto-incremented) | `0` |
+| `AGENT_POOL_MAX_DEPTH` | Max allowed depth | not set (no limit) |
+
+See [parallel-work guide](examples/parallel-work.md) and built-in `orchestrator` skill for patterns.
+
 ## Prerequisites
 
 - **Node.js >= 20** — [Download](https://nodejs.org)
@@ -172,8 +183,10 @@ policies/                   ← Tool restriction policies (YAML)
 skills/                     ← Built-in Gemini CLI skills (Markdown)
 ├── code-reviewer.md
 ├── doc-fixer.md
+├── orchestrator.md
 └── test-writer.md
 src/
+├── cli.js                  ← CLI commands (--check, --init, --help)
 ├── server.js               ← MCP server setup + tool routing
 ├── tool-definitions.js     ← Tool schemas (JSON Schema)
 ├── tools/
@@ -182,17 +195,16 @@ src/
 │   └── skills.js           ← 3-tier skill management (project/global/built-in)
 └── runner/
     ├── config.js           ← Runner config loader (local/SSH)
-    ├── gemini-runner.js    ← Process spawning (streaming JSON)
+    ├── gemini-runner.js    ← Process spawning (streaming JSON, depth tracking)
     ├── process-manager.js  ← PID tracking, system load awareness, group kill
     └── ssh.js              ← Shell escaping, remote PID tracking
-├── cli.js                  ← CLI commands (--check, --init, --help)
 ```
 
 **Process management:**
 - **Detached Spawn**: Workers are spawned in their own process groups.
 - **TTL Cleanup**: Completed task results are purged from memory after 10 minutes.
 - **Live Events**: Progress polling uses a ring buffer to show the latest activity without overwhelming context.
-- **Startup Validation**: Quick prerequisite check before MCP server starts; exits with clear error if Gemini CLI is missing.
+- **Depth Tracking**: Nested orchestration support with optional `AGENT_POOL_MAX_DEPTH` limit.
 
 ## License
 
