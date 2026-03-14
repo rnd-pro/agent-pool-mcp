@@ -71,9 +71,15 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     } else {
       spawnCmd = 'gemini';
       spawnArgs = args;
+      const currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
       spawnOpts = {
         cwd: cwd ?? process.cwd(),
-        env: { ...process.env, TERM: 'dumb', CI: '1' },
+        env: {
+          ...process.env,
+          TERM: 'dumb',
+          CI: '1',
+          AGENT_POOL_DEPTH: String(currentDepth + 1),
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
       };
