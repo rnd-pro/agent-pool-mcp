@@ -23,10 +23,47 @@ import { TOOL_DEFINITIONS } from './tool-definitions.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const defaultCwd = process.cwd();
+
+// ─── Prerequisite check (cached at startup) ──────────────────
+
+let geminiAvailable = null;
+
+function checkGemini() {
+  if (geminiAvailable !== null) return geminiAvailable;
+  try {
+    execFileSync('which', ['gemini'], { encoding: 'utf-8', timeout: 2000 });
+    geminiAvailable = true;
+  } catch {
+    geminiAvailable = false;
+  }
+  return geminiAvailable;
+}
+
+const GEMINI_REQUIRED_ERROR = {
+  content: [{
+    type: 'text',
+    text: `❌ Gemini CLI is not installed or not in PATH.
+
+**To fix:**
+1. Install: \`npm install -g @google/gemini-cli\`
+2. Authenticate: run \`gemini\` (opens browser for OAuth)
+3. Verify: \`gemini --version\`
+4. Restart your IDE to reload the MCP server.
+
+Docs: https://github.com/google-gemini/gemini-cli`
+  }],
+  isError: true,
+};
+
+/** Tools that require Gemini CLI to be installed */
+const GEMINI_TOOLS = new Set([
+  'delegate_task', 'delegate_task_readonly', 'consult_peer', 'list_sessions',
+]);
 
 /**
  * Create and configure the MCP server.
@@ -34,6 +71,9 @@ const defaultCwd = process.cwd();
  * @returns {Server}
  */
 export function createServer() {
+  // Check gemini once at server creation
+  checkGemini();
+
   const server = new Server(
     { name: 'agent-pool', version: '1.0.0' },
     { capabilities: { tools: {} } },
@@ -45,6 +85,11 @@ export function createServer() {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+
+    // Guard: tools that need gemini
+    if (GEMINI_TOOLS.has(name) && !checkGemini()) {
+      return GEMINI_REQUIRED_ERROR;
+    }
 
     let response;
     try {
