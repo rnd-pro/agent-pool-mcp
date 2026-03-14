@@ -123,7 +123,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
       builtinPolicy = builtinPolicy + '.yaml';
     }
     // Path traversal protection: ensure resolved path stays within policies/
-    if (builtinPolicy.startsWith(policiesDir) && fs.existsSync(builtinPolicy)) {
+    if (builtinPolicy.startsWith(policiesDir + path.sep) && fs.existsSync(builtinPolicy)) {
       policyPath = builtinPolicy;
     } else {
       policyPath = null; // Invalid or traversal attempt — ignore

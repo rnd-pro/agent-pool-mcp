@@ -9,105 +9,14 @@
 import { spawn, execFile } from 'node:child_process';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { getRunner, loadConfig } from './config.js';
-import { buildSshSpawn, parseRemotePid, killRemoteProcess } from './ssh.js';
+import { buildSshSpawn, parseRemotePid } from './ssh.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent } from '../tools/results.js';
 
 const DEFAULT_TIMEOUT_SEC = 600;
 const DEFAULT_APPROVAL_MODE = 'yolo';
-const DEFAULT_MODEL = 'gemini-3.1-pro-preview';
 
-export { DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE, DEFAULT_MODEL };
+export { DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE };
 
-/**
- * Run Gemini CLI in headless JSON mode (synchronous, for consult_peer).
- *
- * @param {object} options
- * @param {string} options.prompt - Task prompt
- * @param {string} [options.cwd] - Working directory
- * @param {string} [options.model] - Model ID
- * @param {string} [options.approvalMode] - Approval mode
- * @param {number} [options.timeout] - Timeout in seconds
- * @param {string} [options.sessionId] - Session to resume
- * @param {string} [options.taskId] - Task ID for tracking
- * @returns {Promise<object>} Parsed JSON response
- */
-export function runGeminiHeadless({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, policy, rawOutput, includeDirs }) {
-  return new Promise((resolve, reject) => {
-    const args = [];
-
-    if (sessionId) {
-      args.push('--resume', sessionId);
-    }
-    args.push('-p', prompt);
-    args.push(
-      '--output-format', rawOutput ? 'text' : 'json',
-      '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
-    );
-    const effectiveModel = model || loadConfig().defaultModel;
-    if (effectiveModel) {
-      args.push('--model', effectiveModel);
-    }
-    if (policy) {
-      args.push('--policy', policy);
-    }
-    if (includeDirs?.length > 0) {
-      for (const dir of includeDirs) {
-        args.push('--include-directories', dir);
-      }
-    }
-
-    const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
-
-    const child = spawn('gemini', args, {
-      cwd: cwd ?? process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
-      env: { ...process.env, TERM: 'dumb', CI: '1' },
-    });
-
-    child.unref();
-    trackChild(child.pid, taskId ?? 'headless', 'gemini-headless');
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-
-    const timer = setTimeout(() => {
-      killGroup(child.pid);
-      reject(new Error(`Gemini CLI timed out after ${timeout ?? DEFAULT_TIMEOUT_SEC}s`));
-    }, timeoutMs);
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      untrackChild(child.pid);
-
-      if (code !== 0 && !stdout.trim()) {
-        return reject(new Error(`Gemini CLI failed (exit ${code}): ${stderr}`));
-      }
-
-      if (rawOutput) {
-        return resolve({ response: stdout.trim(), stats: null, raw: true });
-      }
-
-      try {
-        const jsonStart = stdout.indexOf('{');
-        if (jsonStart === -1) {
-          return resolve({ response: stdout.trim(), stats: null, raw: true });
-        }
-        resolve(JSON.parse(stdout.substring(jsonStart)));
-      } catch (parseErr) {
-        resolve({ response: stdout.trim(), stats: null, raw: true, parseError: parseErr.message });
-      }
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      untrackChild(child.pid);
-      reject(new Error(`Failed to spawn gemini: ${err.message}`));
-    });
-  });
-}
 
 /**
  * Run Gemini CLI with stream-json format and collect events.
