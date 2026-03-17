@@ -17,6 +17,7 @@ import { getSystemLoad } from './runner/process-manager.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, cancelTask } from './tools/results.js';
 import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
+import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 
@@ -105,7 +106,7 @@ export function createServer() {
   }
 
   const server = new Server(
-    { name: 'agent-pool', version: '1.0.1' },
+    { name: 'agent-pool', version: '1.1.0' },
     { capabilities: { tools: {} } },
   );
 
@@ -145,6 +146,14 @@ export function createServer() {
           response = handleDeleteSkill(args); break;
         case 'install_skill':
           response = handleInstallSkill(args); break;
+        case 'schedule_task':
+          response = handleScheduleTask(args); break;
+        case 'list_schedules':
+          response = handleListSchedules(args); break;
+        case 'cancel_schedule':
+          response = handleCancelSchedule(args); break;
+        case 'get_scheduled_results':
+          response = handleGetScheduledResults(args); break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -348,3 +357,87 @@ function handleInstallSkill(args) {
     }],
   };
 }
+
+// ─── Scheduler Handlers ─────────────────────────────────────────────
+
+/** @param {object} args */
+function handleScheduleTask(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  try {
+    const result = addSchedule(cwd, {
+      prompt: args.prompt,
+      cron: args.cron,
+      skill: args.skill,
+      approvalMode: args.approval_mode,
+      catchup: args.catchup,
+      taskCwd: args.cwd,
+    });
+
+    return {
+      content: [{
+        type: 'text',
+        text: `⏰ Task scheduled.\n\n- **Schedule ID**: \`${result.scheduleId}\`\n- **Cron**: \`${args.cron}\`\n- **Next run**: ${result.nextRun || 'unknown'}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nDaemon is running in the background. Results will be saved to \`.agent/scheduled-results/\`.\nUse \`list_schedules\` to see all schedules, \`get_scheduled_results\` to read outputs.`,
+      }],
+    };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `❌ Failed to schedule: ${error.message}` }], isError: true };
+  }
+}
+
+/** @param {object} args */
+function handleListSchedules(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const schedules = listSchedules(cwd);
+  const daemon = getDaemonStatus(cwd);
+
+  if (schedules.length === 0) {
+    return { content: [{ type: 'text', text: `No scheduled tasks.\n\nDaemon: ${daemon.running ? `running (pid ${daemon.pid})` : 'not running'}` }] };
+  }
+
+  const lines = schedules.map((s) =>
+    `- **${s.id}** | \`${s.cron}\` | next: ${s.nextRun || '?'} | last: ${s.lastRun || 'never'}\n  ${s.prompt.substring(0, 80)}`,
+  );
+
+  return {
+    content: [{
+      type: 'text',
+      text: `## Scheduled Tasks (${schedules.length})\n\nDaemon: ${daemon.running ? `✅ running (pid ${daemon.pid})` : '❌ not running'}\n\n${lines.join('\n')}`,
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleCancelSchedule(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const removed = removeSchedule(cwd, args.schedule_id);
+  return {
+    content: [{
+      type: 'text',
+      text: removed
+        ? `✅ Schedule \`${args.schedule_id}\` cancelled. Daemon will auto-exit when no schedules remain.`
+        : `❌ Schedule \`${args.schedule_id}\` not found.`,
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleGetScheduledResults(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const results = getScheduledResults(cwd, args.schedule_id);
+
+  if (results.length === 0) {
+    return { content: [{ type: 'text', text: 'No scheduled results yet.' }] };
+  }
+
+  const lines = results.map((r) =>
+    `### ${r.scheduleId} — ${r.executedAt}\n- Exit: ${r.exitCode}\n- Events: ${r.totalEvents}\n\n\`\`\`\n${(r.response || '').substring(0, 500)}\n\`\`\``,
+  );
+
+  return {
+    content: [{
+      type: 'text',
+      text: `## Scheduled Results (${results.length})\n\n${lines.join('\n\n')}`,
+    }],
+  };
+}
+
