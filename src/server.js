@@ -18,6 +18,7 @@ import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, c
 import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
+import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 
@@ -154,6 +155,20 @@ export function createServer() {
           response = handleCancelSchedule(args); break;
         case 'get_scheduled_results':
           response = handleGetScheduledResults(args); break;
+        case 'create_pipeline':
+          response = handleCreatePipeline(args); break;
+        case 'run_pipeline':
+          response = handleRunPipeline(args); break;
+        case 'list_pipelines':
+          response = handleListPipelines(args); break;
+        case 'get_pipeline_status':
+          response = handleGetPipelineStatus(args); break;
+        case 'cancel_pipeline':
+          response = handleCancelPipeline(args); break;
+        case 'signal_step_complete':
+          response = handleSignalStepComplete(args); break;
+        case 'bounce_back':
+          response = handleBounceBack(args); break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -439,5 +454,145 @@ function handleGetScheduledResults(args) {
       text: `## Scheduled Results (${results.length})\n\n${lines.join('\n\n')}`,
     }],
   };
+}
+
+// ─── Pipeline Handlers ─────────────────────────────────────────────
+
+/** @param {object} args */
+function handleCreatePipeline(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const result = createPipeline(cwd, args);
+  return {
+    content: [{
+      type: 'text',
+      text: `✅ Pipeline created.\n\n- **Pipeline ID**: \`${result.pipelineId}\`\n- **Steps**: ${args.steps.length}`
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleRunPipeline(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const result = runPipeline(cwd, args.pipeline_id);
+  if (!result) {
+    return {
+      content: [{ type: 'text', text: `❌ Pipeline \`${args.pipeline_id}\` not found.` }],
+      isError: true,
+    };
+  }
+  return {
+    content: [{
+      type: 'text',
+      text: `🚀 Pipeline started.\n\n- **Run ID**: \`${result.runId}\``
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleListPipelines(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const pipelines = listPipelines(cwd);
+  
+  if (pipelines.length === 0) {
+    return { content: [{ type: 'text', text: 'No pipelines found.' }] };
+  }
+
+  const lines = pipelines.map(p => `- **${p.name}** (\`${p.id}\`) — ${p.steps.length} steps`);
+  
+  return {
+    content: [{
+      type: 'text',
+      text: `## Available Pipelines (${pipelines.length})\n\n${lines.join('\n')}`
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleGetPipelineStatus(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const run = getRun(cwd, args.run_id);
+  
+  if (!run) {
+    return { content: [{ type: 'text', text: `❌ Pipeline run \`${args.run_id}\` not found.` }], isError: true };
+  }
+
+  const emojiMap = {
+    success: '✅',
+    failed: '❌',
+    running: '🔄',
+    pending: '⏸️',
+    bounce_pending: '↩️',
+    waiting_bounce: '⏳',
+    skipped: '⏭️',
+    cancelled: '🛑',
+  };
+
+  const lines = Object.entries(run.steps).map(([name, s]) => {
+    const emoji = emojiMap[s.status] || s.status;
+    return `- ${emoji} **${name}**: ${s.status}`;
+  });
+
+  return {
+    content: [{
+      type: 'text',
+      text: `## Pipeline Status: \`${args.run_id}\`\n**Status**: ${run.status}\n\n${lines.join('\n')}`
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleCancelPipeline(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const success = cancelRun(cwd, args.run_id);
+  return {
+    content: [{
+      type: 'text',
+      text: success ? `✅ Pipeline \`${args.run_id}\` cancelled.` : `❌ Failed to cancel pipeline \`${args.run_id}\` (not found or not running).`
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleSignalStepComplete(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const result = signalStepComplete(cwd, args.step_name, args.output);
+  if (result.success) {
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Step \`${args.step_name}\` marked as complete.`
+      }],
+    };
+  } else {
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Failed to signal step completion. Step might not be running or run not found.`
+      }],
+      isError: true,
+    };
+  }
+}
+
+/** @param {object} args */
+function handleBounceBack(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const info = bounceBack(cwd, args.step_name, args.reason);
+  if (info.success) {
+    return {
+      content: [{
+        type: 'text',
+        text: `↩️ Task bounced back to \`${args.step_name}\`.\nReason: ${args.reason}\nBounces: ${info.bounceCount}/${info.maxBounces}`
+      }],
+    };
+  } else {
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Failed to bounce back. Pipeline might have reached max bounces or step not found.`
+      }],
+      isError: true,
+    };
+  }
 }
 
