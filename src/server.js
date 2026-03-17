@@ -555,7 +555,7 @@ function handleCancelPipeline(args) {
 /** @param {object} args */
 function handleSignalStepComplete(args) {
   const cwd = args.cwd ?? defaultCwd;
-  const result = signalStepComplete(cwd, args.step_name, args.output);
+  const result = signalStepComplete(cwd, args.step_name, args.output, args.run_id);
   if (result.success) {
     return {
       content: [{
@@ -577,7 +577,7 @@ function handleSignalStepComplete(args) {
 /** @param {object} args */
 function handleBounceBack(args) {
   const cwd = args.cwd ?? defaultCwd;
-  const info = bounceBack(cwd, args.step_name, args.reason);
+  const info = bounceBack(cwd, args.step_name, args.reason, args.run_id);
   if (info.success) {
     return {
       content: [{

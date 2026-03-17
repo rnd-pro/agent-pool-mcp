@@ -181,7 +181,7 @@ function spawnStep(stepDef, run, runId, bounceReason) {
   }
 
   // Inject pipeline context
-  prompt = `[Pipeline: ${run.pipelineName}, Step: ${stepDef.name}, Run: ${runId}]\n\nTask:\n${prompt}\n\nWhen finished, call signal_step_complete with step name "${stepDef.name}".`;
+  prompt = `[Pipeline: ${run.pipelineName}, Step: ${stepDef.name}, Run: ${runId}]\n\nTask:\n${prompt}\n\nWhen finished, call signal_step_complete with step_name "${stepDef.name}" and run_id "${runId}".`;
 
   const args = [
     '-p', prompt,
@@ -303,6 +303,12 @@ function tickPipelines() {
         } else if (stepDef.trigger?.type === 'on_complete') {
           const depStep = run.steps[stepDef.trigger.step];
           shouldStart = depStep?.status === 'success';
+        } else if (stepDef.trigger?.type === 'on_complete_all') {
+          // Fan-in: wait for ALL listed steps to complete
+          const deps = stepDef.trigger.steps || [];
+          shouldStart = deps.length > 0 && deps.every(
+            name => run.steps[name]?.status === 'success',
+          );
         } else if (stepDef.trigger?.type === 'on_file') {
           const filePath = join(run.cwd || cwd, stepDef.trigger.path);
           if (existsSync(filePath)) {
