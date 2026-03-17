@@ -492,18 +492,38 @@ function handleRunPipeline(args) {
 function handleListPipelines(args) {
   const cwd = args.cwd ?? defaultCwd;
   const pipelines = listPipelines(cwd);
+  const runs = listRuns(cwd);
   
-  if (pipelines.length === 0) {
+  const parts = [];
+
+  if (pipelines.length > 0) {
+    const lines = pipelines.map(p => `- **${p.name}** (\`${p.id}\`) — ${p.steps.length} steps`);
+    parts.push(`## Pipelines (${pipelines.length})\n\n${lines.join('\n')}`);
+  }
+
+  const activeRuns = runs.filter(r => r.status === 'running');
+  const recentRuns = runs.filter(r => r.status !== 'running').slice(0, 5);
+
+  if (activeRuns.length > 0) {
+    const emojiMap = { success: '✅', failed: '❌', running: '🔄', pending: '⏸️', bounce_pending: '↩️', waiting_bounce: '⏳', skipped: '⏭️', cancelled: '🛑' };
+    const lines = activeRuns.map(r => {
+      const stepsSummary = Object.entries(r.steps).map(([n, s]) => `${emojiMap[s.status] || '❓'}${n}`).join(' → ');
+      return `- \`${r.id}\` (${r.pipelineName}) ${stepsSummary}`;
+    });
+    parts.push(`## Active Runs (${activeRuns.length})\n\n${lines.join('\n')}`);
+  }
+
+  if (recentRuns.length > 0) {
+    const lines = recentRuns.map(r => `- \`${r.id}\` ${r.status === 'success' ? '✅' : '❌'} ${r.pipelineName} (${r.completedAt || ''})`);
+    parts.push(`## Recent Runs\n\n${lines.join('\n')}`);
+  }
+
+  if (parts.length === 0) {
     return { content: [{ type: 'text', text: 'No pipelines found.' }] };
   }
 
-  const lines = pipelines.map(p => `- **${p.name}** (\`${p.id}\`) — ${p.steps.length} steps`);
-  
   return {
-    content: [{
-      type: 'text',
-      text: `## Available Pipelines (${pipelines.length})\n\n${lines.join('\n')}`
-    }],
+    content: [{ type: 'text', text: parts.join('\n\n') }],
   };
 }
 

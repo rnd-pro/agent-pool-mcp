@@ -261,6 +261,7 @@ export const TOOL_DEFINITIONS = [
           description: 'Array of pipeline steps.',
         },
         on_error: { type: 'string', enum: ['stop', 'skip'], description: 'What to do on error. Default is stop.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
       required: ['name', 'steps'],
     },

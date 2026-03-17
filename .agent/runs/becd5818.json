@@ -1,0 +1,43 @@
+{
+  "id": "becd5818",
+  "pipeline": "integration-test",
+  "pipelineName": "integration-test",
+  "status": "success",
+  "cwd": "/Users/v.matiyasevich/Documents/GitHub/agent-pool-mcp",
+  "startedAt": "2026-03-17T02:54:56.365Z",
+  "completedAt": "2026-03-17T02:55:56.543Z",
+  "steps": {
+    "generate": {
+      "status": "success",
+      "pid": 4679,
+      "exitCode": 0,
+      "signaled": true,
+      "bounces": 0,
+      "lastBounceReason": null,
+      "startedAt": "2026-03-17T02:54:56.440Z",
+      "completedAt": "2026-03-17T02:55:13.588Z"
+    },
+    "transform": {
+      "status": "success",
+      "pid": 4794,
+      "exitCode": 0,
+      "signaled": true,
+      "bounces": 0,
+      "lastBounceReason": null,
+      "startedAt": "2026-03-17T02:55:14.469Z",
+      "completedAt": "2026-03-17T02:55:32.773Z",
+      "output": "Data transformed successfully. Items: 3. Result written to .agent/delegation/test-result.json."
+    },
+    "verify": {
+      "status": "success",
+      "pid": 4879,
+      "exitCode": 0,
+      "signaled": true,
+      "bounces": 0,
+      "lastBounceReason": null,
+      "startedAt": "2026-03-17T02:55:35.498Z",
+      "completedAt": "2026-03-17T02:55:55.772Z",
+      "output": "Verification completed successfully. All fields present in .agent/delegation/test-result.json. Report written to .agent/delegation/test-report.md."
+    }
+  }
+}
