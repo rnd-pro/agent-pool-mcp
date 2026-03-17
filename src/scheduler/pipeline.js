@@ -15,6 +15,37 @@ import { ensureDaemon } from './scheduler.js';
 const PIPELINES_DIR = '.agent/pipelines';
 const RUNS_DIR = '.agent/runs';
 
+// ─── Helpers ────────────────────────────────────────────────
+
+/**
+ * Normalize trigger from various input formats to canonical form.
+ * Handles: objects, 'start', step name strings, or missing values.
+ * @param {*} trigger - Raw trigger value from user input
+ * @param {number} i - Step index
+ * @param {Array} steps - All steps array
+ * @returns {string|object} Normalized trigger
+ */
+function normalizeTrigger(trigger, i, steps) {
+  // No trigger → first step starts, others depend on previous
+  if (!trigger) {
+    return i === 0 ? 'start' : { type: 'on_complete', step: steps[i - 1].name };
+  }
+  // Already a proper object → keep as-is
+  if (typeof trigger === 'object' && trigger.type) {
+    return trigger;
+  }
+  // 'start' → first step
+  if (trigger === 'start') {
+    return 'start';
+  }
+  // Plain string → treat as on_complete dependency on that step name
+  if (typeof trigger === 'string') {
+    return { type: 'on_complete', step: trigger };
+  }
+  // Fallback
+  return i === 0 ? 'start' : { type: 'on_complete', step: steps[i - 1].name };
+}
+
 // ─── Pipeline CRUD ──────────────────────────────────────────
 
 /**
@@ -41,7 +72,7 @@ export function createPipeline(cwd, { name, steps, onError }) {
       approvalMode: s.approval_mode || 'yolo',
       timeout: s.timeout || 600,
       maxBounces: s.maxBounces ?? s.max_bounces ?? 2,
-      trigger: s.trigger || (i === 0 ? 'start' : { type: 'on_complete', step: steps[i - 1].name }),
+      trigger: normalizeTrigger(s.trigger, i, steps),
       expectedOutput: s.expectedOutput || s.expected_output || null,
     })),
     onError: onError || 'stop',
@@ -230,13 +261,25 @@ export function findActiveRunByStep(cwd, stepName) {
  * @param {string} cwd
  * @param {string} stepName
  * @param {string} [output]
+ * @param {string} [runId] - Specific run ID (recommended)
  * @returns {{ success: boolean, nextStep?: string }}
  */
-export function signalStepComplete(cwd, stepName, output) {
-  const found = findActiveRunByStep(cwd, stepName);
-  if (!found) return { success: false };
+export function signalStepComplete(cwd, stepName, output, runId) {
+  let run, resolvedRunId;
 
-  const { run, runId } = found;
+  if (runId) {
+    // Direct lookup by run ID
+    run = getRun(cwd, runId);
+    resolvedRunId = runId;
+  } else {
+    // Fallback: search by step name
+    const found = findActiveRunByStep(cwd, stepName);
+    if (!found) return { success: false };
+    run = found.run;
+    resolvedRunId = found.runId;
+  }
+
+  if (!run || run.status !== 'running') return { success: false };
   const step = run.steps[stepName];
   if (!step || step.status !== 'running') return { success: false };
 
@@ -245,7 +288,7 @@ export function signalStepComplete(cwd, stepName, output) {
   step.completedAt = new Date().toISOString();
   if (output) step.output = output;
 
-  saveRun(cwd, runId, run);
+  saveRun(cwd, resolvedRunId, run);
   return { success: true };
 }
 
@@ -254,9 +297,10 @@ export function signalStepComplete(cwd, stepName, output) {
  * @param {string} cwd
  * @param {string} targetStepName - Step to re-run
  * @param {string} reason - Why bouncing back
+ * @param {string} [runId] - Specific run ID (recommended)
  * @returns {{ success: boolean, bounceCount?: number, maxBounces?: number }}
  */
-export function bounceBack(cwd, targetStepName, reason) {
+export function bounceBack(cwd, targetStepName, reason, runId) {
   // Find active run where the caller is running
   const dir = join(cwd, RUNS_DIR);
   if (!existsSync(dir)) return { success: false };

@@ -1,0 +1,28 @@
+{
+  "id": "test-quick",
+  "name": "test-quick",
+  "steps": [
+    {
+      "name": "hello",
+      "prompt": "echo hello",
+      "skill": null,
+      "approvalMode": "yolo",
+      "timeout": 600,
+      "maxBounces": 2,
+      "trigger": "start",
+      "expectedOutput": null
+    },
+    {
+      "name": "world",
+      "prompt": "echo world",
+      "skill": null,
+      "approvalMode": "yolo",
+      "timeout": 600,
+      "maxBounces": 2,
+      "trigger": "hello",
+      "expectedOutput": null
+    }
+  ],
+  "onError": "stop",
+  "createdAt": "2026-03-17T02:33:24.226Z"
+}

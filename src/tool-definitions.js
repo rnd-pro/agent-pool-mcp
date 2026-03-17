@@ -318,6 +318,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         step_name: { type: 'string', description: 'Name of the completed step.' },
+        run_id: { type: 'string', description: 'Pipeline run ID for precise targeting. Provided in the task prompt.' },
         output: { type: 'string', description: 'Optional output message or result.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
@@ -332,6 +333,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         step_name: { type: 'string', description: 'Name of the step to return to.' },
         reason: { type: 'string', description: 'Feedback about missing/insufficient data.' },
+        run_id: { type: 'string', description: 'Pipeline run ID for precise targeting. Provided in the task prompt.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
       required: ['step_name', 'reason'],
