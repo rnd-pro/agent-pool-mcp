@@ -1,6 +1,6 @@
 # agent-pool-mcp
 
-**MCP server for multi-agent orchestration** — parallel task delegation and cross-model peer review via [Gemini CLI](https://github.com/google-gemini/gemini-cli).
+**MCP server for multi-agent orchestration** — parallel task delegation, sequential pipelines, cron scheduling, and cross-model peer review via [Gemini CLI](https://github.com/google-gemini/gemini-cli).
 
 > Developed by [RND-PRO](https://rnd-pro.com)
 
@@ -37,6 +37,60 @@ When the primary agent and Gemini workers are **different foundation models** (e
 - **`delegate_task_readonly`** — Read-only analysis (plan mode). Supports `session_id` to resume previous analyses.
 - **`get_task_result`** — Poll task status, retrieve results, and see live progress (last 200 tool/message events).
 - **`cancel_task`** — Kill a running task and its entire process group immediately.
+
+### 🔗 Pipelines — Sequential Task Chains
+Define multi-step workflows where agents execute sequentially, with automatic handoff:
+
+```
+         ┌─ frontend ─┐
+research ─┤             ├── deploy
+         └─ backend  ─┘
+```
+
+- **`create_pipeline`** — Define a pipeline with named steps, triggers, and timeouts.
+- **`run_pipeline`** — Start executing a pipeline. A detached daemon manages the lifecycle.
+- **`list_pipelines`** — See all definitions, active runs, and recent completions.
+- **`get_pipeline_status`** — Step-by-step status with emoji indicators.
+- **`cancel_pipeline`** — Stop a running pipeline and kill active step processes.
+
+**Agent Signals** (called BY agents running inside pipeline steps):
+- **`signal_step_complete`** — Mark the current step as done. Accepts optional output and `run_id`.
+- **`bounce_back`** — Return task to a previous step with feedback (e.g. "data incomplete"). Supports `maxBounces` limit.
+
+**Triggers:**
+
+| Trigger | Description |
+|---------|-------------|
+| `on_complete` | Start when a specific step succeeds |
+| `on_complete_all` | Fan-in: start when ALL listed steps succeed |
+| `on_file` | Start when a file appears and the producing process exits |
+| Auto-fallback | Process death without signal → auto-complete/fail |
+
+**Example — 3-step pipeline:**
+```javascript
+// Agent creates the pipeline
+create_pipeline({
+  name: "article-workflow",
+  steps: [
+    { name: "research", prompt: "Research the topic and write notes to research.md" },
+    { name: "draft", prompt: "Read research.md and write article draft" },
+    { name: "review", prompt: "Review the draft for accuracy and style" }
+  ]
+})
+
+// Agent starts execution — daemon handles the rest
+run_pipeline({ pipeline_id: "article-workflow" })
+```
+
+### ⏰ Cron Scheduler
+Schedule agents to run automatically on a cron schedule:
+
+- **`schedule_task`** — Schedule a Gemini CLI agent with cron expression (e.g. `0 9 * * MON-FRI`).
+- **`list_schedules`** — See all schedules with next run times and daemon status.
+- **`cancel_schedule`** — Remove a schedule. Daemon auto-exits when no schedules remain.
+- **`get_scheduled_results`** — Retrieve results from past scheduled executions.
+
+The scheduler runs as a **detached daemon** that survives IDE/CLI restarts. It uses atomic file locks to prevent duplicate execution when multiple clients are connected.
 
 ### 📋 3-Tier Skill System
 Skills are Markdown files with YAML frontmatter that extend agent behavior. Agent-pool manages skills in three tiers:
@@ -210,11 +264,16 @@ src/
 │   ├── consult.js          ← Peer review via Gemini CLI
 │   ├── results.js          ← Task store + result formatting (TTL cleanup, ring buffer)
 │   └── skills.js           ← 3-tier skill management (project/global/built-in)
-└── runner/
-    ├── config.js           ← Runner config loader (local/SSH)
-    ├── gemini-runner.js    ← Process spawning (streaming JSON, depth tracking)
-    ├── process-manager.js  ← PID tracking, system load awareness, group kill
-    └── ssh.js              ← Shell escaping, remote PID tracking
+├── runner/
+│   ├── config.js           ← Runner config loader (local/SSH)
+│   ├── gemini-runner.js    ← Process spawning (streaming JSON, depth tracking)
+│   ├── process-manager.js  ← PID tracking, system load awareness, group kill
+│   └── ssh.js              ← Shell escaping, remote PID tracking
+└── scheduler/
+    ├── cron.js             ← Minimal cron expression parser (zero-dependency)
+    ├── daemon.js           ← Detached daemon: schedule ticks + pipeline lifecycle
+    ├── pipeline.js         ← Pipeline CRUD, run state, signals, bounce-back
+    └── scheduler.js        ← Schedule management + daemon spawning
 ```
 
 **Process management:**
@@ -222,7 +281,10 @@ src/
 - **TTL Cleanup**: Completed task results are purged from memory after 10 minutes.
 - **Live Events**: Progress polling uses a ring buffer to show the latest activity without overwhelming context.
 - **Depth Tracking**: Nested orchestration support with optional `AGENT_POOL_MAX_DEPTH` limit.
+- **Adaptive Polling**: Pipeline daemon uses 3s intervals when active, 30s when idle.
+- **File-Based Communication**: Pipeline agents communicate through `.agent/runs/` JSON files — each Gemini process has its own MCP server instance but shares state via filesystem.
 
 ## License
 
 MIT
+
