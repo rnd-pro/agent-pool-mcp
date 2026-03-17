@@ -173,4 +173,66 @@ export const TOOL_DEFINITIONS = [
       required: ['skill_name'],
     },
   },
+  // ─── Scheduler Tools ────────────────────────────────────
+  {
+    name: 'schedule_task',
+    description: [
+      'Schedule a Gemini CLI agent to run on a cron schedule or as a delayed one-shot.',
+      'Spawns a persistent daemon that survives IDE/CLI restarts.',
+      'Results are saved to .agent/scheduled-results/ and can be retrieved with get_scheduled_results.',
+      '',
+      'Cron format: standard 5-field (minute hour day month weekday).',
+      'Examples: "*/30 * * * *" (every 30 min), "0 9 * * MON-FRI" (9am weekdays), "0 */2 * * *" (every 2 hours).',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Task prompt for the Gemini agent.' },
+        cron: { type: 'string', description: 'Cron expression (5-field). E.g. "0 9 * * *" for daily at 9am.' },
+        cwd: { type: 'string', description: 'Working directory for the scheduled task. Defaults to current directory.' },
+        skill: { type: 'string', description: 'Skill to activate for each run.' },
+        approval_mode: {
+          type: 'string',
+          enum: ['yolo', 'auto_edit', 'plan'],
+          description: 'Approval mode for scheduled runs. Default: yolo.',
+        },
+        catchup: { type: 'boolean', description: 'If true, run missed schedules on daemon restart. Default: false (skip missed).' },
+      },
+      required: ['prompt', 'cron'],
+    },
+  },
+  {
+    name: 'list_schedules',
+    description: 'List all scheduled tasks with their cron expressions, next run times, and daemon status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+    },
+  },
+  {
+    name: 'cancel_schedule',
+    description: 'Cancel a scheduled task by ID. Removes it from the schedule. The daemon will auto-exit when no schedules remain.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        schedule_id: { type: 'string', description: 'Schedule ID to cancel.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['schedule_id'],
+    },
+  },
+  {
+    name: 'get_scheduled_results',
+    description: 'Get results from scheduled task executions. Returns the last 20 results, newest first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        schedule_id: { type: 'string', description: 'Filter results by schedule ID. Omit to get all.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+    },
+  },
 ];
+
