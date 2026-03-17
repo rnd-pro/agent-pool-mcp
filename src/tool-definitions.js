@@ -234,5 +234,108 @@ export const TOOL_DEFINITIONS = [
       },
     },
   },
+  // ─── Pipeline Tools ────────────────────────────────────
+  {
+    name: 'create_pipeline',
+    description: 'Create a pipeline definition with sequential steps.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Pipeline name.' },
+        steps: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Step name.' },
+              prompt: { type: 'string', description: 'Step prompt.' },
+              trigger: { type: 'string', description: 'Trigger condition.' },
+              skill: { type: 'string', description: 'Skill to use.' },
+              approval_mode: { type: 'string', description: 'Approval mode.' },
+              timeout: { type: 'number', description: 'Timeout in seconds.' },
+              max_bounces: { type: 'number', description: 'Maximum bounces allowed.' },
+              expected_output: { type: 'string', description: 'Expected output description.' },
+            },
+            required: ['name', 'prompt'],
+          },
+          description: 'Array of pipeline steps.',
+        },
+        on_error: { type: 'string', enum: ['stop', 'skip'], description: 'What to do on error. Default is stop.' },
+      },
+      required: ['name', 'steps'],
+    },
+  },
+  {
+    name: 'run_pipeline',
+    description: 'Start executing a pipeline.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pipeline_id: { type: 'string', description: 'Pipeline ID to run.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['pipeline_id'],
+    },
+  },
+  {
+    name: 'list_pipelines',
+    description: 'List all pipeline definitions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+    },
+  },
+  {
+    name: 'get_pipeline_status',
+    description: 'Get status of a pipeline run.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: { type: 'string', description: 'Pipeline run ID.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['run_id'],
+    },
+  },
+  {
+    name: 'cancel_pipeline',
+    description: 'Cancel a running pipeline.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: { type: 'string', description: 'Pipeline run ID to cancel.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['run_id'],
+    },
+  },
+  {
+    name: 'signal_step_complete',
+    description: 'Signal that a pipeline step is complete (called BY agents running inside pipeline steps).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        step_name: { type: 'string', description: 'Name of the completed step.' },
+        output: { type: 'string', description: 'Optional output message or result.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['step_name'],
+    },
+  },
+  {
+    name: 'bounce_back',
+    description: 'Return task to a previous pipeline step with feedback about missing/insufficient data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        step_name: { type: 'string', description: 'Name of the step to return to.' },
+        reason: { type: 'string', description: 'Feedback about missing/insufficient data.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['step_name', 'reason'],
+    },
+  },
 ];
 

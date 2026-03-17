@@ -159,17 +159,219 @@ function executeSchedule(schedule) {
   console.error(`[scheduler] Started: ${schedule.id} → gemini pid ${child.pid}`);
 }
 
+// ─── Pipeline tick ──────────────────────────────────────────
+
+import { readdirSync } from 'node:fs';
+
+const PIPELINES_DIR = '.agent/pipelines';
+const RUNS_DIR = '.agent/runs';
+
+/**
+ * Spawn a Gemini CLI agent for a pipeline step.
+ * @param {object} stepDef - Step definition from pipeline
+ * @param {object} run - Current run state
+ * @param {string} runId
+ * @param {string} [bounceReason] - If bouncing back, the reason
+ * @returns {number} child PID
+ */
+function spawnStep(stepDef, run, runId, bounceReason) {
+  let prompt = stepDef.prompt;
+  if (bounceReason) {
+    prompt = `${stepDef.prompt}\n\n⚠️ BOUNCE BACK: предыдущая попытка была отклонена следующим шагом.\nПричина: ${bounceReason}\nДополни и улучши результат.`;
+  }
+
+  // Inject pipeline context
+  prompt = `[Pipeline: ${run.pipelineName}, Step: ${stepDef.name}, Run: ${runId}]\n\nTask:\n${prompt}\n\nWhen finished, call signal_step_complete with step name "${stepDef.name}".`;
+
+  const args = [
+    '-p', prompt,
+    '--output-format', 'stream-json',
+    '--approval-mode', stepDef.approvalMode || 'yolo',
+  ];
+
+  const child = spawn('gemini', args, {
+    cwd: run.cwd || cwd,
+    env: { ...process.env, TERM: 'dumb', CI: '1' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true,
+  });
+
+  child.on('close', (code) => {
+    // Update step exit code in run state
+    try {
+      const currentRun = JSON.parse(readFileSync(join(cwd, RUNS_DIR, `${runId}.json`), 'utf-8'));
+      if (currentRun.steps[stepDef.name]) {
+        currentRun.steps[stepDef.name].exitCode = code;
+      }
+      writeFileSync(join(cwd, RUNS_DIR, `${runId}.json`), JSON.stringify(currentRun, null, 2));
+    } catch { /* ignore */ }
+    console.error(`[pipeline] Step "${stepDef.name}" exited (code: ${code}, run: ${runId})`);
+  });
+
+  child.stdin.end();
+  child.unref();
+
+  console.error(`[pipeline] Started step "${stepDef.name}" → pid ${child.pid} (run: ${runId})`);
+  return child.pid;
+}
+
+/**
+ * Check if a process is alive.
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function isAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch { return false; }
+}
+
+/**
+ * Process pipeline runs — check triggers, advance steps.
+ * @returns {boolean} true if any pipeline is actively running
+ */
+function tickPipelines() {
+  const runsDir = join(cwd, RUNS_DIR);
+  if (!existsSync(runsDir)) return false;
+
+  const pipelinesDir = join(cwd, PIPELINES_DIR);
+  let hasActive = false;
+
+  for (const file of readdirSync(runsDir).filter(f => f.endsWith('.json'))) {
+    let run;
+    try { run = JSON.parse(readFileSync(join(runsDir, file), 'utf-8')); }
+    catch { continue; }
+
+    if (run.status !== 'running') continue;
+    hasActive = true;
+
+    // Load pipeline definition
+    let pipeline;
+    try {
+      pipeline = JSON.parse(readFileSync(join(pipelinesDir, `${run.pipeline}.json`), 'utf-8'));
+    } catch { continue; }
+
+    const runId = file.replace('.json', '');
+    let modified = false;
+
+    for (const stepDef of pipeline.steps) {
+      const step = run.steps[stepDef.name];
+      if (!step) continue;
+
+      // ── Handle bounce_pending: re-run the step ──
+      if (step.status === 'bounce_pending') {
+        step.status = 'running';
+        step.startedAt = new Date().toISOString();
+        step.pid = spawnStep(stepDef, run, runId, step.lastBounceReason);
+        modified = true;
+        continue;
+      }
+
+      // ── Handle running steps: check if process died ──
+      if (step.status === 'running' && step.pid) {
+        if (!isAlive(step.pid)) {
+          // Process is dead — did agent signal?
+          if (!step.signaled) {
+            // Auto-fallback: check exit code
+            if (step.exitCode === 0 || step.exitCode === null) {
+              // Treat as success (agent forgot to signal)
+              step.status = 'success';
+              step.completedAt = new Date().toISOString();
+              console.error(`[pipeline] Step "${stepDef.name}" auto-completed (pid dead, exit: ${step.exitCode})`);
+            } else {
+              // Failed
+              step.status = 'failed';
+              step.completedAt = new Date().toISOString();
+              console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode})`);
+              if (pipeline.onError === 'stop') {
+                run.status = 'failed';
+                run.completedAt = new Date().toISOString();
+              }
+            }
+            modified = true;
+          }
+        }
+        continue;
+      }
+
+      // ── Handle pending steps: check trigger ──
+      if (step.status === 'pending') {
+        let shouldStart = false;
+
+        if (stepDef.trigger === 'start') {
+          // First step — always start
+          shouldStart = true;
+        } else if (stepDef.trigger?.type === 'on_complete') {
+          const depStep = run.steps[stepDef.trigger.step];
+          shouldStart = depStep?.status === 'success';
+        } else if (stepDef.trigger?.type === 'on_file') {
+          const filePath = join(run.cwd || cwd, stepDef.trigger.path);
+          if (existsSync(filePath)) {
+            // File exists — check if producing process is dead
+            const depStepName = pipeline.steps[pipeline.steps.indexOf(stepDef) - 1]?.name;
+            const depStep = depStepName ? run.steps[depStepName] : null;
+            if (!depStep?.pid || !isAlive(depStep.pid)) {
+              shouldStart = true;
+            }
+          }
+        }
+
+        if (shouldStart && run.status === 'running') {
+          step.status = 'running';
+          step.startedAt = new Date().toISOString();
+          step.pid = spawnStep(stepDef, run, runId);
+          modified = true;
+        }
+      }
+
+      // ── Handle waiting_bounce: restart when bounced step completes ──
+      if (step.status === 'waiting_bounce') {
+        const depStepName = stepDef.trigger?.step;
+        if (depStepName && run.steps[depStepName]?.status === 'success') {
+          step.status = 'running';
+          step.startedAt = new Date().toISOString();
+          step.pid = spawnStep(stepDef, run, runId);
+          modified = true;
+        }
+      }
+    }
+
+    // Check if all steps are done
+    const allDone = Object.values(run.steps).every(s =>
+      s.status === 'success' || s.status === 'failed' || s.status === 'skipped' || s.status === 'cancelled',
+    );
+    if (allDone && run.status === 'running') {
+      const hasFailed = Object.values(run.steps).some(s => s.status === 'failed');
+      run.status = hasFailed ? 'failed' : 'success';
+      run.completedAt = new Date().toISOString();
+      modified = true;
+      console.error(`[pipeline] Run ${runId} completed: ${run.status}`);
+    }
+
+    if (modified) {
+      writeFileSync(join(runsDir, file), JSON.stringify(run, null, 2));
+    }
+  }
+
+  return hasActive;
+}
+
 // ─── Main loop ──────────────────────────────────────────────
 
 function tick() {
   const now = new Date();
   const schedules = readSchedules();
+  const hasActivePipeline = tickPipelines();
 
-  if (schedules.length === 0) {
-    // No schedules — exit daemon to free resources
-    console.error('[scheduler] No schedules remaining. Daemon exiting.');
-    releaseLock();
-    process.exit(0);
+  if (schedules.length === 0 && !hasActivePipeline) {
+    // No work — check for pipeline definitions before exiting
+    const pipelinesDir = join(cwd, PIPELINES_DIR);
+    const runsDir = join(cwd, RUNS_DIR);
+    const hasRuns = existsSync(runsDir) && readdirSync(runsDir).some(f => f.endsWith('.json'));
+    if (!hasRuns) {
+      console.error('[scheduler] No schedules or active pipelines. Daemon exiting.');
+      releaseLock();
+      process.exit(0);
+    }
   }
 
   for (const schedule of schedules) {
@@ -201,6 +403,10 @@ function tick() {
 
     executeSchedule(schedule);
   }
+
+  // Adaptive polling: fast when pipeline active, slow otherwise
+  const nextTickMs = hasActivePipeline ? 3000 : 30000;
+  setTimeout(tick, nextTickMs);
 }
 
 // ─── Startup ────────────────────────────────────────────────
@@ -211,10 +417,8 @@ process.on('SIGINT', () => { releaseLock(); process.exit(0); });
 process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
 
 console.error(`[scheduler] Daemon started (pid ${process.pid}, cwd: ${cwd})`);
-console.error(`[scheduler] Polling every ${POLL_INTERVAL_MS / 1000}s`);
+console.error(`[scheduler] Adaptive polling: 3s active / 30s idle`);
 
-// Initial tick
+// Start the loop
 tick();
 
-// Main loop
-setInterval(tick, POLL_INTERVAL_MS);
