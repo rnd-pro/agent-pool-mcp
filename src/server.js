@@ -6,9 +6,12 @@
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 
@@ -108,8 +111,32 @@ export function createServer() {
 
   const server = new Server(
     { name: 'agent-pool', version: '1.2.1' },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, resources: {} } },
   );
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [{
+      uri: 'agent-pool://guide',
+      name: 'Usage Guide',
+      description: 'Comprehensive guide for agent-pool',
+      mimeType: 'text/markdown',
+    }],
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === 'agent-pool://guide') {
+      const guidePath = path.resolve(__dirname, '..', 'GUIDE.md');
+      const content = fs.readFileSync(guidePath, 'utf-8');
+      return {
+        contents: [{
+          uri: request.params.uri,
+          mimeType: 'text/markdown',
+          text: content,
+        }],
+      };
+    }
+    throw new Error(`Resource not found: ${request.params.uri}`);
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOL_DEFINITIONS,
@@ -155,6 +182,8 @@ export function createServer() {
           response = handleCancelSchedule(args); break;
         case 'get_scheduled_results':
           response = handleGetScheduledResults(args); break;
+        case 'get_usage_guide':
+          response = handleGetUsageGuide(args); break;
         case 'create_pipeline':
           response = handleCreatePipeline(args); break;
         case 'run_pipeline':
@@ -169,6 +198,8 @@ export function createServer() {
           response = handleSignalStepComplete(args); break;
         case 'bounce_back':
           response = handleBounceBack(args); break;
+        case 'get_usage_guide':
+          response = handleGetUsageGuide(args); break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -614,5 +645,46 @@ function handleBounceBack(args) {
       isError: true,
     };
   }
+}
+
+/** @param {object} args */
+function handleGetUsageGuide(args) {
+  const guidePath = path.resolve(__dirname, '..', 'GUIDE.md');
+  if (!fs.existsSync(guidePath)) {
+    return { content: [{ type: 'text', text: 'Guide not found.' }], isError: true };
+  }
+  
+  const fullContent = fs.readFileSync(guidePath, 'utf-8');
+  
+  if (!args.topic) {
+    return { content: [{ type: 'text', text: fullContent }] };
+  }
+  
+  const topicLower = args.topic.toLowerCase();
+  const lines = fullContent.split('\n');
+  let inTopic = false;
+  let topicContent = [];
+  
+  for (const line of lines) {
+    if (line.toLowerCase().startsWith(`## ${topicLower}`)) {
+      inTopic = true;
+      topicContent.push(line);
+      continue;
+    }
+    
+    if (inTopic && line.startsWith('## ')) {
+      break; // End of section
+    }
+    
+    if (inTopic) {
+      topicContent.push(line);
+    }
+  }
+  
+  if (topicContent.length === 0) {
+    return { content: [{ type: 'text', text: `Topic '${args.topic}' not found in the guide.\n\nAvailable topics: delegation, pipelines, scheduling, skills, peer-review, sessions.` }] };
+  }
+  
+  return { content: [{ type: 'text', text: topicContent.join('\n').trim() }] };
 }
 
