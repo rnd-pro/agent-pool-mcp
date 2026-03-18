@@ -7,6 +7,26 @@
 
 export const TOOL_DEFINITIONS = [
   {
+    name: 'get_usage_guide',
+    description: [
+      'Get the comprehensive usage guide for agent-pool with examples and best practices.',
+      'Call this FIRST when planning how to use agent-pool tools for parallel work, pipelines, or scheduling.',
+      'Returns practical examples for each feature area.',
+      '',
+      'Available topics: delegation, pipelines, scheduling, skills, peer-review, sessions.',
+      'Omit topic to get the full guide.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'Optional topic filter: delegation, pipelines, scheduling, skills, peer-review, sessions',
+        },
+      },
+    },
+  },
+  {
     name: 'delegate_task',
     description: [
       'Delegate a coding task to a Gemini CLI agent running in headless mode.',
