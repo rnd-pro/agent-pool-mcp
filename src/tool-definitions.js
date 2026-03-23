@@ -199,7 +199,7 @@ export const TOOL_DEFINITIONS = [
     description: [
       'Schedule a Gemini CLI agent to run on a cron schedule or as a delayed one-shot.',
       'Spawns a persistent daemon that survives IDE/CLI restarts.',
-      'Results are saved to .agent/scheduled-results/ and can be retrieved with get_scheduled_results.',
+      'Results are saved to .agents/scheduled-results/ and can be retrieved with get_scheduled_results.',
       '',
       'Cron format: standard 5-field (minute hour day month weekday).',
       'Examples: "*/30 * * * *" (every 30 min), "0 9 * * MON-FRI" (9am weekdays), "0 */2 * * *" (every 2 hours).',

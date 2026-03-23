@@ -17,9 +17,9 @@ import { join, dirname } from 'node:path';
 import { matchesCron } from './cron.js';
 
 const POLL_INTERVAL_MS = 30_000; // Check schedules every 30 seconds
-const PID_FILE = '.agent/scheduler.pid';
-const SCHEDULE_FILE = '.agent/schedule.json';
-const RESULTS_DIR = '.agent/scheduled-results';
+const PID_FILE = '.agents/scheduler.pid';
+const SCHEDULE_FILE = '.agents/schedule.json';
+const RESULTS_DIR = '.agents/scheduled-results';
 
 /** @type {string} */
 const cwd = process.argv[2] || process.cwd();
@@ -163,8 +163,8 @@ function executeSchedule(schedule) {
 
 import { readdirSync } from 'node:fs';
 
-const PIPELINES_DIR = '.agent/pipelines';
-const RUNS_DIR = '.agent/runs';
+const PIPELINES_DIR = '.agents/pipelines';
+const RUNS_DIR = '.agents/runs';
 
 /**
  * Spawn a Gemini CLI agent for a pipeline step.
