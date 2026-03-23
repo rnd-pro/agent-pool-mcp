@@ -41,10 +41,10 @@ Before delegating, declare scope in the delegation status file. Each agent owns 
 
 ## Sync Directory
 
-Use `.agent/delegation/` in the project root:
+Use `.agents/delegation/` in the project root:
 
 ```
-.agent/delegation/
+.agents/delegation/
 ├── status.md        — who's doing what, locked files
 ├── handoff.md       — completed step → next agent picks up
 └── findings.md      — research results, audit reports
@@ -89,7 +89,7 @@ Multiple `delegate_task_readonly` for different aspects simultaneously.
 **On timeout**:
 1. **Check findings files FIRST** — agent may have written partial results before timeout
    ```bash
-   ls .agent/delegation/findings-*.md   # ALWAYS check regardless of timeout
+   ls .agents/delegation/findings-*.md   # ALWAYS check regardless of timeout
    ```
 2. **Retry with longer timeout** — do NOT skip the delegation
 3. If 2 retries fail — investigate why (wrong prompt, network, tool issue)
@@ -112,11 +112,11 @@ Violations include:
 
 **Correct process for Research → Implementation**:
 ```
-0. mkdir -p .agent/delegation/         ← ensure dir exists BEFORE delegating
+0. mkdir -p .agents/delegation/         ← ensure dir exists BEFORE delegating
 1. delegate_task_readonly(research, timeout=300)
 2. WAIT with get_task_result() — poll every 30-60s
-3. On timeout → ls .agent/delegation/  ← check for partial results
-4. READ findings from .agent/delegation/findings-*.md
+3. On timeout → ls .agents/delegation/  ← check for partial results
+4. READ findings from .agents/delegation/findings-*.md
 5. consult_peer(proposal)              ← discuss architecture with peer agent
 6. ONLY THEN proceed to implementation
 ```

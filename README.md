@@ -282,7 +282,7 @@ src/
 - **Live Events**: Progress polling uses a ring buffer to show the latest activity without overwhelming context.
 - **Depth Tracking**: Nested orchestration support with optional `AGENT_POOL_MAX_DEPTH` limit.
 - **Adaptive Polling**: Pipeline daemon uses 3s intervals when active, 30s when idle.
-- **File-Based Communication**: Pipeline agents communicate through `.agent/runs/` JSON files — each Gemini process has its own MCP server instance but shares state via filesystem.
+- **File-Based Communication**: Pipeline agents communicate through `.agents/runs/` JSON files — each Gemini process has its own MCP server instance but shares state via filesystem.
 
 ## License
 

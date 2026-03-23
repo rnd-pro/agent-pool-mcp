@@ -1,8 +1,8 @@
 /**
  * Pipeline management — CRUD for pipeline definitions and run state.
  *
- * Pipelines are stored as JSON templates in .agent/pipelines/.
- * Each execution creates a run state in .agent/runs/.
+ * Pipelines are stored as JSON templates in .agents/pipelines/.
+ * Each execution creates a run state in .agents/runs/.
  *
  * @module agent-pool/scheduler/pipeline
  */
@@ -12,8 +12,8 @@ import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureDaemon } from './scheduler.js';
 
-const PIPELINES_DIR = '.agent/pipelines';
-const RUNS_DIR = '.agent/runs';
+const PIPELINES_DIR = '.agents/pipelines';
+const RUNS_DIR = '.agents/runs';
 
 // ─── Helpers ────────────────────────────────────────────────
 
