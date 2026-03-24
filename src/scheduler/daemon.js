@@ -11,10 +11,14 @@
  * @module agent-pool/scheduler/daemon
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { matchesCron } from './cron.js';
+import { getGroup } from '../tools/groups.js';
+import { getRunner } from '../runner/config.js';
+import { buildSshSpawn } from '../runner/ssh.js';
+import { killGroup } from '../runner/process-manager.js';
 
 const POLL_INTERVAL_MS = 30_000; // Check schedules every 30 seconds
 const PID_FILE = '.agents/scheduler.pid';
@@ -161,59 +165,118 @@ function executeSchedule(schedule) {
 
 // ─── Pipeline tick ──────────────────────────────────────────
 
-import { readdirSync } from 'node:fs';
-
 const PIPELINES_DIR = '.agents/pipelines';
 const RUNS_DIR = '.agents/runs';
 
 /**
- * Spawn a Gemini CLI agent for a pipeline step.
+ * Spawn Gemini CLI agent(s) for a pipeline step.
  * @param {object} stepDef - Step definition from pipeline
  * @param {object} run - Current run state
  * @param {string} runId
  * @param {string} [bounceReason] - If bouncing back, the reason
- * @returns {number} child PID
+ * @returns {number[]} Array of child PIDs
  */
 function spawnStep(stepDef, run, runId, bounceReason) {
-  let prompt = stepDef.prompt;
-  if (bounceReason) {
-    prompt = `${stepDef.prompt}\n\n⚠️ BOUNCE BACK: предыдущая попытка была отклонена следующим шагом.\nПричина: ${bounceReason}\nДополни и улучши результат.`;
+  const count = stepDef.count || 1;
+  const pids = [];
+
+  // Resolve group
+  let groupConfig = {};
+  if (stepDef.group) {
+    groupConfig = getGroup(run.cwd || cwd, stepDef.group) || {};
   }
 
-  // Inject pipeline context
-  prompt = `[Pipeline: ${run.pipelineName}, Step: ${stepDef.name}, Run: ${runId}]\n\nTask:\n${prompt}\n\nWhen finished, call signal_step_complete with step_name "${stepDef.name}" and run_id "${runId}".`;
+  const skill = stepDef.skill || groupConfig.skill;
+  const policy = groupConfig.policy; // currently policy only from group
+  const runnerId = groupConfig.runner;
+  const runner = runnerId ? getRunner(runnerId) : { type: 'local' };
+  const isRemote = runner && runner.type === 'ssh';
 
-  const args = [
-    '-p', prompt,
-    '--output-format', 'stream-json',
-    '--approval-mode', stepDef.approvalMode || 'yolo',
-  ];
+  for (let i = 0; i < count; i++) {
+    let prompt = stepDef.prompt;
+    if (bounceReason) {
+      prompt = `${stepDef.prompt}\n\n⚠️ BOUNCE BACK: предыдущая попытка была отклонена следующим шагом.\nПричина: ${bounceReason}\nДополни и улучши результат.`;
+    }
 
-  const child = spawn('gemini', args, {
-    cwd: run.cwd || cwd,
-    env: { ...process.env, TERM: 'dumb', CI: '1' },
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: true,
-  });
+    if (count > 1) {
+      prompt = `[Agent ${i + 1}/${count}]\n\n${prompt}`;
+    }
 
-  child.on('close', (code) => {
-    // Update step exit code in run state
-    try {
-      const currentRun = JSON.parse(readFileSync(join(cwd, RUNS_DIR, `${runId}.json`), 'utf-8'));
-      if (currentRun.steps[stepDef.name]) {
-        currentRun.steps[stepDef.name].exitCode = code;
+    // Inject pipeline context
+    prompt = `[Pipeline: ${run.pipelineName}, Step: ${stepDef.name}, Run: ${runId}]\n\nTask:\n${prompt}\n\nWhen finished, call signal_step_complete with step_name "${stepDef.name}" and run_id "${runId}".`;
+
+    const args = [
+      '-p', prompt,
+      '--output-format', 'stream-json',
+      '--approval-mode', stepDef.approvalMode || 'yolo',
+    ];
+
+    if (skill) {
+      // Skills can be active via prompt injection, as we do for scheduled tasks
+      args[1] = `Activate skill "${skill}" first.\n\n${args[1]}`;
+    }
+    if (policy) {
+      args.push('--policy', policy);
+    }
+    if (groupConfig.include_dirs?.length > 0) {
+      for (const dir of groupConfig.include_dirs) {
+        args.push('--include-directories', dir);
       }
-      writeFileSync(join(cwd, RUNS_DIR, `${runId}.json`), JSON.stringify(currentRun, null, 2));
-    } catch { /* ignore */ }
-    console.error(`[pipeline] Step "${stepDef.name}" exited (code: ${code}, run: ${runId})`);
-  });
+    }
 
-  child.stdin.end();
-  child.unref();
+    let spawnCmd, spawnArgs, spawnOpts;
+    if (isRemote) {
+      const ssh = buildSshSpawn(runner, args, run.cwd || cwd);
+      spawnCmd = ssh.command;
+      spawnArgs = ssh.args;
+      spawnOpts = { stdio: ['pipe', 'pipe', 'pipe'], detached: true };
+    } else {
+      spawnCmd = 'gemini';
+      spawnArgs = args;
+      const currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
+      spawnOpts = {
+        cwd: run.cwd || cwd,
+        env: {
+          ...process.env,
+          TERM: 'dumb',
+          CI: '1',
+          AGENT_POOL_DEPTH: String(currentDepth + 1)
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
+      };
+      if (count > 1) spawnOpts.env.AGENT_INDEX = String(i);
+    }
 
-  console.error(`[pipeline] Started step "${stepDef.name}" → pid ${child.pid} (run: ${runId})`);
-  return child.pid;
+    const child = spawn(spawnCmd, spawnArgs, spawnOpts);
+
+    child.on('close', (code) => {
+      // Update step exit code in run state
+      try {
+        const currentRun = JSON.parse(readFileSync(join(cwd, RUNS_DIR, `${runId}.json`), 'utf-8'));
+        if (currentRun.steps[stepDef.name]) {
+          // If any child fails, set exit code to non-zero
+          if (code !== 0) {
+             currentRun.steps[stepDef.name].exitCode = code;
+          } else if (currentRun.steps[stepDef.name].exitCode === null) {
+             currentRun.steps[stepDef.name].exitCode = 0;
+          }
+        }
+        writeFileSync(join(cwd, RUNS_DIR, `${runId}.json`), JSON.stringify(currentRun, null, 2));
+      } catch { /* ignore */ }
+      console.error(`[pipeline] Step "${stepDef.name}" [pid ${child.pid}] exited (code: ${code}, run: ${runId})`);
+    });
+
+    child.stdin.end();
+    child.unref();
+
+    console.error(`[pipeline] Started step "${stepDef.name}" → pid ${child.pid} (run: ${runId})`);
+    pids.push(child.pid);
+  }
+
+  return pids;
 }
+
 
 /**
  * Check if a process is alive.
@@ -261,33 +324,67 @@ function tickPipelines() {
       if (step.status === 'bounce_pending') {
         step.status = 'running';
         step.startedAt = new Date().toISOString();
-        step.pid = spawnStep(stepDef, run, runId, step.lastBounceReason);
+        const pids = spawnStep(stepDef, run, runId, step.lastBounceReason);
+        step.pids = pids;
+        if (pids.length > 0) step.pid = pids[0];
         modified = true;
         continue;
       }
 
       // ── Handle running steps: check if process died ──
-      if (step.status === 'running' && step.pid) {
-        if (!isAlive(step.pid)) {
-          // Process is dead — did agent signal?
-          if (!step.signaled) {
-            // Auto-fallback: check exit code
-            if (step.exitCode === 0 || step.exitCode === null) {
-              // Treat as success (agent forgot to signal)
-              step.status = 'success';
-              step.completedAt = new Date().toISOString();
-              console.error(`[pipeline] Step "${stepDef.name}" auto-completed (pid dead, exit: ${step.exitCode})`);
-            } else {
-              // Failed
-              step.status = 'failed';
-              step.completedAt = new Date().toISOString();
-              console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode})`);
-              if (pipeline.onError === 'stop') {
-                run.status = 'failed';
-                run.completedAt = new Date().toISOString();
-              }
+      if (step.status === 'running') {
+        const pids = step.pids?.length > 0 ? step.pids : (step.pid ? [step.pid] : []);
+        if (pids.length === 0) continue;
+
+        let livingPids = 0;
+        for (const pid of pids) if (isAlive(pid)) livingPids++;
+
+        const isParallel = pids.length > 1;
+
+        if (isParallel) {
+          // Parallel semantics: rely entirely on exit codes
+          if (step.exitCode !== null && step.exitCode !== 0) {
+            // Fail fast: kill siblings
+            for (const pid of pids) if (isAlive(pid)) killGroup(pid);
+            step.status = 'failed';
+            step.completedAt = new Date().toISOString();
+            console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode})`);
+            if (pipeline.onError === 'stop') {
+              run.status = 'failed';
+              run.completedAt = new Date().toISOString();
             }
             modified = true;
+          } else if (livingPids === 0) {
+            // All dead and no errors
+            step.status = 'success';
+            step.completedAt = new Date().toISOString();
+            console.error(`[pipeline] Step "${stepDef.name}" parallel completed successfully`);
+            modified = true;
+          }
+        } else {
+          // Sequential semantics (count 1)
+          const pid = pids[0];
+          if (!isAlive(pid)) {
+            // Process is dead — did agent signal?
+            if (!step.signaled) {
+              // Auto-fallback: check exit code
+              if (step.exitCode === 0 || step.exitCode === null) {
+                // Treat as success (agent forgot to signal)
+                step.status = 'success';
+                step.completedAt = new Date().toISOString();
+                console.error(`[pipeline] Step "${stepDef.name}" auto-completed (pid dead, exit: ${step.exitCode})`);
+              } else {
+                // Failed
+                step.status = 'failed';
+                step.completedAt = new Date().toISOString();
+                console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode})`);
+                if (pipeline.onError === 'stop') {
+                  run.status = 'failed';
+                  run.completedAt = new Date().toISOString();
+                }
+              }
+              modified = true;
+            }
           }
         }
         continue;
@@ -324,7 +421,9 @@ function tickPipelines() {
         if (shouldStart && run.status === 'running') {
           step.status = 'running';
           step.startedAt = new Date().toISOString();
-          step.pid = spawnStep(stepDef, run, runId);
+          const pids = spawnStep(stepDef, run, runId);
+          step.pids = pids;
+          if (pids.length > 0) step.pid = pids[0];
           modified = true;
         }
       }
@@ -335,7 +434,9 @@ function tickPipelines() {
         if (depStepName && run.steps[depStepName]?.status === 'success') {
           step.status = 'running';
           step.startedAt = new Date().toISOString();
-          step.pid = spawnStep(stepDef, run, runId);
+          const pids = spawnStep(stepDef, run, runId);
+          step.pids = pids;
+          if (pids.length > 0) step.pid = pids[0];
           modified = true;
         }
       }

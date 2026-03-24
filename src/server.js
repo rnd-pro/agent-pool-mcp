@@ -112,7 +112,7 @@ export function createServer() {
   }
 
   const server = new Server(
-    { name: 'agent-pool', version: '1.5.0' },
+    { name: 'agent-pool', version: '1.6.0' },
     { capabilities: { tools: {}, resources: {} } },
   );
 
