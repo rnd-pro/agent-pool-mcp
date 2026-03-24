@@ -45,3 +45,21 @@ Manage Gemini CLI sessions. Use `list_sessions` to find available sessions to re
 **Example:**
 list_sessions({ cwd: "/project" })
 delegate_task({ prompt: "Continue refactoring", session_id: "sess-xyz", cwd: "/project" })
+
+## Groups
+Create named agent groups with shared config. Groups are reusable presets — define runner, skill, and policy once, then delegate to the group by name. Use `count` to spawn multiple agents in parallel (fractal orchestration).
+
+**Example:**
+```
+create_group({ name: "backend-team", runner: "remote", skill: "node-dev", policy: "safe-edit", max_agents: 3 })
+create_group({ name: "qa-team", policy: "read-only", skill: "test-writer" })
+
+// Spawn 2 agents from backend-team
+delegate_to_group({ group: "backend-team", prompt: "Refactor auth module", count: 2 })
+// Returns: [task_id_1, task_id_2]
+
+// List groups
+list_groups()
+```
+
+Groups persist to `.agents/groups.json` and survive IDE restarts.
