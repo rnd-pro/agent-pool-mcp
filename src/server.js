@@ -22,6 +22,7 @@ import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } fr
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
 import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
+import { createGroup, listGroups, getGroup } from './tools/groups.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 
@@ -68,6 +69,7 @@ Docs: https://github.com/google-gemini/gemini-cli`
 /** Tools that require Gemini CLI to be installed */
 const GEMINI_TOOLS = new Set([
   'delegate_task', 'delegate_task_readonly', 'consult_peer', 'list_sessions',
+  'delegate_to_group',
 ]);
 
 // ─── Depth tracking (for nested orchestration) ──────────────
@@ -110,7 +112,7 @@ export function createServer() {
   }
 
   const server = new Server(
-    { name: 'agent-pool', version: '1.2.1' },
+    { name: 'agent-pool', version: '1.5.0' },
     { capabilities: { tools: {}, resources: {} } },
   );
 
@@ -200,6 +202,12 @@ export function createServer() {
           response = handleBounceBack(args); break;
         case 'get_usage_guide':
           response = handleGetUsageGuide(args); break;
+        case 'create_group':
+          response = handleCreateGroup(args); break;
+        case 'list_groups':
+          response = handleListGroups(args); break;
+        case 'delegate_to_group':
+          response = handleDelegateToGroup(args); break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -688,3 +696,110 @@ function handleGetUsageGuide(args) {
   return { content: [{ type: 'text', text: topicContent.join('\n').trim() }] };
 }
 
+// ─── Group Handlers ─────────────────────────────────────────────
+
+/** @param {object} args */
+function handleCreateGroup(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const result = createGroup(cwd, {
+    name: args.name,
+    runner: args.runner,
+    skill: args.skill,
+    policy: args.policy,
+    max_agents: args.max_agents,
+    include_dirs: args.include_dirs,
+  });
+
+  const configParts = [];
+  if (args.runner) configParts.push(`runner: ${args.runner}`);
+  if (args.skill) configParts.push(`skill: ${args.skill}`);
+  if (args.policy) configParts.push(`policy: ${args.policy}`);
+  if (args.max_agents) configParts.push(`max: ${args.max_agents}`);
+
+  return {
+    content: [{
+      type: 'text',
+      text: `✅ Group ${result.created ? 'created' : 'updated'}: \`${args.name}\`${configParts.length > 0 ? `\n- ${configParts.join('\n- ')}` : ''}\n\nUse \`delegate_to_group\` to send tasks to this group.`,
+    }],
+  };
+}
+
+/** @param {object} args */
+function handleListGroups(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const groups = listGroups(cwd);
+
+  if (groups.length === 0) {
+    return { content: [{ type: 'text', text: 'No groups defined. Use `create_group` to create one.' }] };
+  }
+
+  const lines = groups.map((g) => {
+    const parts = [];
+    if (g.runner) parts.push(`runner: ${g.runner}`);
+    if (g.skill) parts.push(`skill: ${g.skill}`);
+    if (g.policy) parts.push(`policy: ${g.policy}`);
+    if (g.max_agents) parts.push(`max: ${g.max_agents}`);
+    return `- **${g.name}** — ${parts.join(', ') || 'no config'}`;
+  });
+
+  return {
+    content: [{ type: 'text', text: `## Agent Groups (${groups.length})\n\n${lines.join('\n')}` }],
+  };
+}
+
+/** @param {object} args */
+function handleDelegateToGroup(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const group = getGroup(cwd, args.group);
+
+  if (!group) {
+    return {
+      content: [{ type: 'text', text: `❌ Group \`${args.group}\` not found. Use \`list_groups\` to see available groups.` }],
+      isError: true,
+    };
+  }
+
+  const count = args.count ?? 1;
+
+  // Check max_agents limit
+  if (group.max_agents && count > group.max_agents) {
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Requested ${count} agents but group \`${args.group}\` allows max ${group.max_agents}.`,
+      }],
+      isError: true,
+    };
+  }
+
+  const taskIds = [];
+
+  for (let i = 0; i < count; i++) {
+    const delegateArgs = {
+      prompt: count > 1 ? `[Agent ${i + 1}/${count} in group "${args.group}"]\n\n${args.prompt}` : args.prompt,
+      cwd,
+      runner: group.runner || undefined,
+      skill: group.skill || undefined,
+      policy: group.policy || undefined,
+      include_dirs: group.include_dirs || undefined,
+      timeout: args.timeout,
+    };
+
+    const result = handleDelegate(delegateArgs, {
+      approvalMode: DEFAULT_APPROVAL_MODE,
+      emoji: '👥',
+      label: `Group task (${args.group} #${i + 1})`,
+    });
+
+    // Extract task_id from response text
+    const match = result.content[0].text.match(/`([0-9a-f-]{36})`/);
+    if (match) taskIds.push(match[1]);
+  }
+
+  return {
+    content: [{
+      type: 'text',
+      text: `👥 Delegated to group \`${args.group}\` — ${count} agent(s) spawned.\n\n${taskIds.map((id, i) => `- Agent ${i + 1}: \`${id}\``).join('\n')}\n\nUse \`get_task_result\` to check each agent's status.`,
+    }],
+  };
+}

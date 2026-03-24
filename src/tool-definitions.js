@@ -360,5 +360,53 @@ export const TOOL_DEFINITIONS = [
       required: ['step_name', 'reason'],
     },
   },
+  // ─── Group Tools ────────────────────────────────────────
+  {
+    name: 'create_group',
+    description: 'Create a named agent group with shared config (runner, skill, policy). Groups are reusable presets for fractal orchestration.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Group name (e.g. "backend-team", "qa-group").' },
+        runner: { type: 'string', description: 'Default runner for agents in this group.' },
+        skill: { type: 'string', description: 'Default skill activated for all agents in this group.' },
+        policy: { type: 'string', description: 'Default policy restricting agent permissions.' },
+        max_agents: { type: 'number', description: 'Max concurrent agents allowed in this group.' },
+        include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories agents in this group can access.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_groups',
+    description: 'List all registered agent groups with their config.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+    },
+  },
+  {
+    name: 'delegate_to_group',
+    description: [
+      'Delegate a task to a named agent group. Spawns agents with the group\'s shared config (runner, skill, policy).',
+      'Use `count` to launch multiple agents in parallel (fractal orchestration).',
+      '',
+      'Returns array of task_ids immediately (non-blocking). Use get_task_result to check each.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        group: { type: 'string', description: 'Group name to delegate to.' },
+        prompt: { type: 'string', description: 'Task description for the agents.' },
+        count: { type: 'number', description: 'Number of agents to spawn. Default: 1.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+        timeout: { type: 'number', description: 'Timeout in seconds. Overrides group default.' },
+      },
+      required: ['group', 'prompt'],
+    },
+  },
 ];
 
