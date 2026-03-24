@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlink
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureDaemon } from './scheduler.js';
+import { killGroup } from '../runner/process-manager.js';
 
 const PIPELINES_DIR = '.agents/pipelines';
 const RUNS_DIR = '.agents/runs';
@@ -69,6 +70,8 @@ export function createPipeline(cwd, { name, steps, onError }) {
       name: s.name,
       prompt: s.prompt,
       skill: s.skill || null,
+      group: s.group || null,
+      count: s.count ? parseInt(s.count, 10) : 1,
       approvalMode: s.approval_mode || 'yolo',
       timeout: s.timeout || 600,
       maxBounces: s.maxBounces ?? s.max_bounces ?? 2,
@@ -134,7 +137,8 @@ export function runPipeline(cwd, pipelineId) {
   for (const step of pipeline.steps) {
     steps[step.name] = {
       status: 'pending',
-      pid: null,
+      pid: null,     // Legacy / single pid
+      pids: [],      // Array for parallel execution
       exitCode: null,
       signaled: false,
       bounces: 0,
@@ -219,8 +223,13 @@ export function cancelRun(cwd, runId) {
 
   // Kill any running step
   for (const [name, step] of Object.entries(run.steps)) {
-    if (step.status === 'running' && step.pid) {
-      try { process.kill(step.pid, 'SIGTERM'); } catch { /* already dead */ }
+    if (step.status === 'running') {
+      const pidsToKill = [...(step.pids || [])];
+      if (step.pid && !pidsToKill.includes(step.pid)) pidsToKill.push(step.pid);
+
+      for (const pid of pidsToKill) {
+        killGroup(pid);
+      }
       step.status = 'cancelled';
     }
     if (step.status === 'pending') {
@@ -332,7 +341,16 @@ export function bounceBack(cwd, targetStepName, reason, runId) {
       targetStep.status = 'bounce_pending';
       targetStep.bounces += 1;
       targetStep.lastBounceReason = reason;
+
+      // Fail-fast: kill any remaining running agents for this step
+      const pidsToKill = [...(targetStep.pids || [])];
+      if (targetStep.pid && !pidsToKill.includes(targetStep.pid)) pidsToKill.push(targetStep.pid);
+      for (const pid of pidsToKill) {
+        killGroup(pid);
+      }
+
       targetStep.pid = null;
+      targetStep.pids = [];
       targetStep.exitCode = null;
       targetStep.signaled = false;
 
