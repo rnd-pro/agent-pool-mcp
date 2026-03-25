@@ -23,6 +23,7 @@ import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
 import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
 import { createGroup, listGroups, getGroup } from './tools/groups.js';
+import { sendMessage, getMessages } from './tools/messaging.js';
 
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 
@@ -112,7 +113,7 @@ export function createServer() {
   }
 
   const server = new Server(
-    { name: 'agent-pool', version: '1.6.0' },
+    { name: 'agent-pool', version: '1.7.0' },
     { capabilities: { tools: {}, resources: {} } },
   );
 
@@ -208,6 +209,10 @@ export function createServer() {
           response = handleListGroups(args); break;
         case 'delegate_to_group':
           response = handleDelegateToGroup(args); break;
+        case 'send_message':
+          response = handleSendMessage(args); break;
+        case 'get_messages':
+          response = handleGetMessages(args); break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -803,3 +808,58 @@ function handleDelegateToGroup(args) {
     }],
   };
 }
+
+// ─── Messaging handlers ─────────────────────────────────────
+
+function handleSendMessage(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const result = sendMessage(cwd, {
+    channel: args.channel,
+    payload: args.payload,
+    from: args.from,
+  });
+
+  if (!result.success) {
+    return {
+      content: [{ type: 'text', text: `❌ Failed to send message: ${result.error || 'unknown error'}` }],
+      isError: true,
+    };
+  }
+
+  return {
+    content: [{ type: 'text', text: `📨 Message sent to channel \`${result.channel}\`.` }],
+  };
+}
+
+function handleGetMessages(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  const result = getMessages(cwd, {
+    channel: args.channel,
+    clear: args.clear,
+  });
+
+  if (result.error) {
+    return {
+      content: [{ type: 'text', text: `❌ ${result.error}` }],
+      isError: true,
+    };
+  }
+
+  if (result.count === 0) {
+    return {
+      content: [{ type: 'text', text: `📭 No messages on channel \`${args.channel}\`.` }],
+    };
+  }
+
+  const lines = result.messages.map((m, i) =>
+    `**${i + 1}.** [${m.timestamp}] from \`${m.from}\`:\n\`\`\`json\n${JSON.stringify(m.payload, null, 2)}\n\`\`\``
+  );
+
+  return {
+    content: [{
+      type: 'text',
+      text: `📬 **${result.count}** message(s) on channel \`${args.channel}\`${args.clear ? ' (cleared)' : ''}:\n\n${lines.join('\n\n')}`,
+    }],
+  };
+}
+

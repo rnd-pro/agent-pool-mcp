@@ -63,3 +63,26 @@ list_groups()
 ```
 
 Groups persist to `.agents/groups.json` and survive IDE restarts.
+
+## Messaging
+Send structured data between agents or pipeline steps using `send_message` and `get_messages`. Messages are persisted as JSONL files in `.agents/messages/`.
+
+**Channel conventions:**
+- `{run_id}` — broadcast to all steps in a pipeline run
+- `{run_id}:{step_name}` — targeted to a specific step
+- Any string — ad-hoc channel for custom messaging
+
+**Example:**
+```
+// Step 1 sends analysis results to step 2
+send_message({ channel: "abc123:review", payload: { issues: ["missing error handling", "no tests"] }, from: "analyzer" })
+
+// Step 2 reads the results
+get_messages({ channel: "abc123:review" })
+// Returns: { messages: [...], count: 1 }
+
+// Read and clear (consume mode)
+get_messages({ channel: "abc123:review", clear: true })
+```
+
+Messages survive restarts. Concurrent writes are safe (JSONL + appendFile).

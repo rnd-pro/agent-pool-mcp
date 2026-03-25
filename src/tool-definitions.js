@@ -408,5 +408,49 @@ export const TOOL_DEFINITIONS = [
       required: ['group', 'prompt'],
     },
   },
+  {
+    name: 'send_message',
+    description: [
+      'Send a message to a channel for inter-agent communication.',
+      'Use this to pass structured data between pipeline steps or between any agents.',
+      '',
+      'Channel conventions:',
+      '  - {run_id} — broadcast to all steps in a pipeline run',
+      '  - {run_id}:{step_name} — targeted to a specific step',
+      '  - any string — ad-hoc channel for custom messaging',
+      '',
+      'Messages are persisted to disk (survives restarts). Uses JSONL format for concurrent-write safety.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: 'Target channel. Use run_id for broadcast, run_id:step_name for targeted.' },
+        payload: { description: 'Message payload (any JSON-serializable value).' },
+        from: { type: 'string', description: 'Sender identifier (e.g., step name or task description).' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+      required: ['channel', 'payload'],
+    },
+  },
+  {
+    name: 'get_messages',
+    description: [
+      'Read messages from a channel. Returns all messages in chronological order.',
+      '',
+      'Channel conventions:',
+      '  - {run_id} — read broadcast messages for a pipeline run',
+      '  - {run_id}:{step_name} — read messages targeted to a specific step',
+      '',
+      'Use clear=true to consume messages (delete after reading).',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: 'Channel to read messages from.' },
+        clear: { type: 'boolean', description: 'If true, clear the channel after reading (consume mode). Default: false.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+      required: ['channel'],
+    },
+  },
 ];
-
