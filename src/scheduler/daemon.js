@@ -11,7 +11,7 @@
  * @module agent-pool/scheduler/daemon
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, renameSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { matchesCron } from './cron.js';
@@ -19,6 +19,7 @@ import { getGroup } from '../tools/groups.js';
 import { getRunner } from '../runner/config.js';
 import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
+import { consumeSignals, deleteSignals } from './run-signals.js';
 
 const POLL_INTERVAL_MS = 30_000; // Check schedules every 30 seconds
 const PID_FILE = '.agents/scheduler.pid';
@@ -163,10 +164,124 @@ function executeSchedule(schedule) {
   console.error(`[scheduler] Started: ${schedule.id} → gemini pid ${child.pid}`);
 }
 
-// ─── Pipeline tick ──────────────────────────────────────────
+// ─── Pipeline tick ──────────────────────────────────────────────────
 
 const PIPELINES_DIR = '.agents/pipelines';
 const RUNS_DIR = '.agents/runs';
+
+/**
+ * In-memory pipeline state cache.
+ * Loaded from disk on startup, updated in-place during ticks.
+ * Written to disk on state transitions (write-through).
+ * @type {Map<string, object>}
+ */
+const runCache = new Map();
+
+/**
+ * Load all active runs from disk into the in-memory cache.
+ * Called once on daemon startup.
+ */
+function loadRunCache() {
+  const dir = join(cwd, RUNS_DIR);
+  if (!existsSync(dir)) return;
+  for (const f of readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('.signal-'))) {
+    try {
+      const run = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
+      const runId = f.replace('.json', '');
+      runCache.set(runId, run);
+    } catch { /* skip corrupted */ }
+  }
+  console.error(`[pipeline] Loaded ${runCache.size} runs into memory cache`);
+}
+
+/**
+ * Persist a run to disk atomically (write-then-rename).
+ * Prevents corruption if daemon crashes mid-write.
+ * @param {string} runId
+ * @param {object} run
+ */
+function persistRun(runId, run) {
+  const dir = join(cwd, RUNS_DIR);
+  mkdirSync(dir, { recursive: true });
+  const target = join(dir, `${runId}.json`);
+  const tmp = join(dir, `${runId}.json.tmp`);
+  writeFileSync(tmp, JSON.stringify(run, null, 2));
+  // Atomic rename (same filesystem) — prevents corruption on crash
+  try { renameSync(tmp, target); }
+  catch { writeFileSync(target, JSON.stringify(run, null, 2)); }
+}
+
+/**
+ * Apply consumed signal files to a run's in-memory state.
+ * @param {object} run - Run state object (mutated in place)
+ * @param {Array} signals - Consumed signal objects
+ * @param {object} pipeline - Pipeline definition
+ * @returns {boolean} true if any signal was applied
+ */
+function applySignals(run, signals, pipeline) {
+  let modified = false;
+  for (const signal of signals) {
+    if (signal.type === 'STEP_COMPLETE') {
+      const step = run.steps[signal.stepName];
+      if (step && step.status === 'running') {
+        step.status = 'success';
+        step.signaled = true;
+        step.completedAt = new Date().toISOString();
+        if (signal.output) step.output = signal.output;
+        modified = true;
+        console.error(`[pipeline] Signal: step "${signal.stepName}" completed`);
+      }
+    } else if (signal.type === 'BOUNCE_BACK') {
+      const targetStep = run.steps[signal.stepName];
+      if (!targetStep) continue;
+
+      const stepDef = pipeline?.steps.find(s => s.name === signal.stepName);
+      const maxBounces = stepDef?.maxBounces ?? 2;
+
+      if (targetStep.bounces >= maxBounces) {
+        // Bounce limit reached
+        targetStep.status = 'failed';
+        targetStep.lastBounceReason = `Bounce limit (${maxBounces}) reached. Last: ${signal.reason}`;
+        run.status = 'failed';
+        run.completedAt = new Date().toISOString();
+        console.error(`[pipeline] Bounce limit reached for "${signal.stepName}"`);
+      } else {
+        // Reset target step
+        targetStep.status = 'bounce_pending';
+        targetStep.bounces = (targetStep.bounces || 0) + 1;
+        targetStep.lastBounceReason = signal.reason;
+
+        // Kill running processes for this step
+        const pidsToKill = [...(targetStep.pids || [])];
+        if (targetStep.pid && !pidsToKill.includes(targetStep.pid)) pidsToKill.push(targetStep.pid);
+        for (const pid of pidsToKill) killGroup(pid);
+
+        targetStep.pid = null;
+        targetStep.pids = [];
+        targetStep.exitCode = null;
+        targetStep.signaled = false;
+
+        // Reset calling step
+        if (signal.callingStepName && run.steps[signal.callingStepName]) {
+          run.steps[signal.callingStepName].status = 'waiting_bounce';
+        }
+        console.error(`[pipeline] Bounce: step "${signal.stepName}" reset (reason: ${signal.reason})`);
+      }
+      modified = true;
+    } else if (signal.type === 'CANCEL_RUN') {
+      // Cancel the entire run
+      for (const [name, step] of Object.entries(run.steps)) {
+        if (step.status === 'running') step.status = 'cancelled';
+        if (step.status === 'pending') step.status = 'skipped';
+      }
+      run.status = 'cancelled';
+      run.completedAt = new Date().toISOString();
+      console.error(`[pipeline] Signal: run cancelled`);
+      modified = true;
+    }
+  }
+  return modified;
+}
 
 /**
  * Spawn Gemini CLI agent(s) for a pipeline step.
@@ -251,19 +366,17 @@ function spawnStep(stepDef, run, runId, bounceReason) {
     const child = spawn(spawnCmd, spawnArgs, spawnOpts);
 
     child.on('close', (code) => {
-      // Update step exit code in run state
-      try {
-        const currentRun = JSON.parse(readFileSync(join(cwd, RUNS_DIR, `${runId}.json`), 'utf-8'));
-        if (currentRun.steps[stepDef.name]) {
-          // If any child fails, set exit code to non-zero
-          if (code !== 0) {
-             currentRun.steps[stepDef.name].exitCode = code;
-          } else if (currentRun.steps[stepDef.name].exitCode === null) {
-             currentRun.steps[stepDef.name].exitCode = 0;
-          }
+      // Update step exit code in in-memory state directly (same process)
+      const currentRun = runCache.get(runId);
+      if (currentRun?.steps[stepDef.name]) {
+        if (code !== 0) {
+          currentRun.steps[stepDef.name].exitCode = code;
+        } else if (currentRun.steps[stepDef.name].exitCode === null) {
+          currentRun.steps[stepDef.name].exitCode = 0;
         }
-        writeFileSync(join(cwd, RUNS_DIR, `${runId}.json`), JSON.stringify(currentRun, null, 2));
-      } catch { /* ignore */ }
+        // Write-through to disk
+        persistRun(runId, currentRun);
+      }
       console.error(`[pipeline] Step "${stepDef.name}" [pid ${child.pid}] exited (code: ${code}, run: ${runId})`);
     });
 
@@ -289,33 +402,69 @@ function isAlive(pid) {
 }
 
 /**
- * Process pipeline runs — check triggers, advance steps.
+ * Process pipeline runs — consume signals, check triggers, advance steps.
+ * Uses in-memory cache for state; persists to disk on changes.
  * @returns {boolean} true if any pipeline is actively running
  */
 function tickPipelines() {
+  // Pick up new runs added to disk since last tick (e.g., from runPipeline)
   const runsDir = join(cwd, RUNS_DIR);
-  if (!existsSync(runsDir)) return false;
+  if (existsSync(runsDir)) {
+    for (const f of readdirSync(runsDir).filter(f => f.endsWith('.json') && !f.includes('.signal-') && !f.endsWith('.tmp'))) {
+      const runId = f.replace('.json', '');
+      if (!runCache.has(runId)) {
+        try {
+          const run = JSON.parse(readFileSync(join(runsDir, f), 'utf-8'));
+          runCache.set(runId, run);
+          console.error(`[pipeline] Picked up new run: ${runId}`);
+        } catch { /* skip corrupted */ }
+      }
+    }
+  }
 
   const pipelinesDir = join(cwd, PIPELINES_DIR);
   let hasActive = false;
 
-  for (const file of readdirSync(runsDir).filter(f => f.endsWith('.json'))) {
-    let run;
-    try { run = JSON.parse(readFileSync(join(runsDir, file), 'utf-8')); }
-    catch { continue; }
+  // Iterate over a copy of keys to allow modification of runCache during iteration
+  for (const runId of Array.from(runCache.keys())) {
+    const run = runCache.get(runId);
 
-    if (run.status !== 'running') continue;
+    // Evict completed runs from cache (memory leak fix)
+    if (run.status !== 'running') {
+      // Clean up any orphaned/late signals for completed runs
+      const lateSignals = consumeSignals(cwd, runId);
+      if (lateSignals.length > 0) {
+        deleteSignals(cwd, lateSignals);
+        console.error(`[pipeline] Cleaned ${lateSignals.length} orphaned signal(s) for completed run ${runId}`);
+      }
+      runCache.delete(runId);
+      continue;
+    }
     hasActive = true;
 
     // Load pipeline definition
     let pipeline;
     try {
       pipeline = JSON.parse(readFileSync(join(pipelinesDir, `${run.pipeline}.json`), 'utf-8'));
-    } catch { continue; }
+    } catch {
+      console.error(`[pipeline] Could not load pipeline definition for run ${runId}: ${run.pipeline}.json`);
+      continue;
+    }
 
-    const runId = file.replace('.json', '');
+    // 1. Consume and apply signal files
+    const signals = consumeSignals(cwd, runId);
     let modified = false;
 
+    if (signals.length > 0) {
+      modified = applySignals(run, signals, pipeline);
+      if (modified) {
+        // Durability: persist state BEFORE deleting signals
+        persistRun(runId, run);
+        deleteSignals(cwd, signals);
+      }
+    }
+
+    // 2. Process each step
     for (const stepDef of pipeline.steps) {
       const step = run.steps[stepDef.name];
       if (!step) continue;
@@ -455,7 +604,7 @@ function tickPipelines() {
     }
 
     if (modified) {
-      writeFileSync(join(runsDir, file), JSON.stringify(run, null, 2));
+      persistRun(runId, run);
     }
   }
 
@@ -516,9 +665,10 @@ function tick() {
   setTimeout(tick, nextTickMs);
 }
 
-// ─── Startup ────────────────────────────────────────────────
+// ─── Startup ────────────────────────────────────────────────────
 
 acquireLock();
+loadRunCache();
 
 process.on('SIGINT', () => { releaseLock(); process.exit(0); });
 process.on('SIGTERM', () => { releaseLock(); process.exit(0); });

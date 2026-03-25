@@ -12,6 +12,7 @@ import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureDaemon } from './scheduler.js';
 import { killGroup } from '../runner/process-manager.js';
+import { writeSignal } from './run-signals.js';
 
 const PIPELINES_DIR = '.agents/pipelines';
 const RUNS_DIR = '.agents/runs';
@@ -202,7 +203,7 @@ export function listRuns(cwd, pipelineId) {
   const dir = join(cwd, RUNS_DIR);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter(f => f.endsWith('.json'))
+    .filter(f => f.endsWith('.json') && !f.includes('.signal-'))
     .map(f => {
       try { return JSON.parse(readFileSync(join(dir, f), 'utf-8')); }
       catch { return null; }
@@ -212,7 +213,8 @@ export function listRuns(cwd, pipelineId) {
 }
 
 /**
- * Cancel a pipeline run.
+ * Cancel a pipeline run. Writes a signal file for the daemon.
+ * Kills running processes immediately for responsiveness.
  * @param {string} cwd
  * @param {string} runId
  * @returns {boolean}
@@ -221,24 +223,22 @@ export function cancelRun(cwd, runId) {
   const run = getRun(cwd, runId);
   if (!run || run.status !== 'running') return false;
 
-  // Kill any running step
+  // Kill running processes immediately (side-effect safe)
   for (const [name, step] of Object.entries(run.steps)) {
     if (step.status === 'running') {
       const pidsToKill = [...(step.pids || [])];
       if (step.pid && !pidsToKill.includes(step.pid)) pidsToKill.push(step.pid);
-
       for (const pid of pidsToKill) {
         killGroup(pid);
       }
-      step.status = 'cancelled';
-    }
-    if (step.status === 'pending') {
-      step.status = 'skipped';
     }
   }
-  run.status = 'cancelled';
-  run.completedAt = new Date().toISOString();
-  saveRun(cwd, runId, run);
+
+  // Write signal file — daemon will apply the state change
+  writeSignal(cwd, runId, {
+    type: 'CANCEL_RUN',
+  });
+
   return true;
 }
 
@@ -254,7 +254,7 @@ export function findActiveRunByStep(cwd, stepName) {
   const dir = join(cwd, RUNS_DIR);
   if (!existsSync(dir)) return null;
 
-  for (const f of readdirSync(dir).filter(f => f.endsWith('.json'))) {
+  for (const f of readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('.signal-'))) {
     try {
       const run = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
       if (run.status === 'running' && run.steps[stepName]) {
@@ -267,42 +267,42 @@ export function findActiveRunByStep(cwd, stepName) {
 
 /**
  * Signal step completion. Called by agent via MCP tool.
+ * Writes a signal file instead of mutating run state directly.
+ * The daemon will consume this signal on its next tick.
  * @param {string} cwd
  * @param {string} stepName
  * @param {string} [output]
  * @param {string} [runId] - Specific run ID (recommended)
- * @returns {{ success: boolean, nextStep?: string }}
+ * @returns {{ success: boolean }}
  */
 export function signalStepComplete(cwd, stepName, output, runId) {
-  let run, resolvedRunId;
+  let resolvedRunId = runId;
 
-  if (runId) {
-    // Direct lookup by run ID
-    run = getRun(cwd, runId);
-    resolvedRunId = runId;
-  } else {
+  if (!resolvedRunId) {
     // Fallback: search by step name
     const found = findActiveRunByStep(cwd, stepName);
     if (!found) return { success: false };
-    run = found.run;
     resolvedRunId = found.runId;
   }
 
+  // Verify run exists and is active
+  const run = getRun(cwd, resolvedRunId);
   if (!run || run.status !== 'running') return { success: false };
-  const step = run.steps[stepName];
-  if (!step || step.status !== 'running') return { success: false };
+  if (!run.steps[stepName] || run.steps[stepName].status !== 'running') return { success: false };
 
-  step.status = 'success';
-  step.signaled = true;
-  step.completedAt = new Date().toISOString();
-  if (output) step.output = output;
+  // Write signal file — daemon will apply it
+  writeSignal(cwd, resolvedRunId, {
+    type: 'STEP_COMPLETE',
+    stepName,
+    output: output || null,
+  });
 
-  saveRun(cwd, resolvedRunId, run);
   return { success: true };
 }
 
 /**
  * Bounce back to a previous step. Called by agent via MCP tool.
+ * Writes a signal file instead of mutating run state directly.
  * @param {string} cwd
  * @param {string} targetStepName - Step to re-run
  * @param {string} reason - Why bouncing back
@@ -310,63 +310,53 @@ export function signalStepComplete(cwd, stepName, output, runId) {
  * @returns {{ success: boolean, bounceCount?: number, maxBounces?: number }}
  */
 export function bounceBack(cwd, targetStepName, reason, runId) {
-  // Find active run where the caller is running
-  const dir = join(cwd, RUNS_DIR);
-  if (!existsSync(dir)) return { success: false };
+  // Find the active run containing this step
+  let resolvedRunId = runId;
+  let run;
 
-  for (const f of readdirSync(dir).filter(f => f.endsWith('.json'))) {
-    try {
-      const run = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
-      if (run.status !== 'running') continue;
-
-      const targetStep = run.steps[targetStepName];
-      if (!targetStep) continue;
-
-      // Find the pipeline definition for maxBounces
-      const pipeline = getPipeline(run.cwd || cwd, run.pipeline);
-      const stepDef = pipeline?.steps.find(s => s.name === targetStepName);
-      const maxBounces = stepDef?.maxBounces ?? 2;
-
-      if (targetStep.bounces >= maxBounces) {
-        // Bounce limit reached — fail pipeline
-        targetStep.status = 'failed';
-        targetStep.lastBounceReason = `Bounce limit (${maxBounces}) reached. Last: ${reason}`;
-        run.status = 'failed';
-        run.completedAt = new Date().toISOString();
-        saveRun(cwd, f.replace('.json', ''), run);
-        return { success: false, bounceCount: targetStep.bounces, maxBounces };
-      }
-
-      // Reset target step to pending with bounce info
-      targetStep.status = 'bounce_pending';
-      targetStep.bounces += 1;
-      targetStep.lastBounceReason = reason;
-
-      // Fail-fast: kill any remaining running agents for this step
-      const pidsToKill = [...(targetStep.pids || [])];
-      if (targetStep.pid && !pidsToKill.includes(targetStep.pid)) pidsToKill.push(targetStep.pid);
-      for (const pid of pidsToKill) {
-        killGroup(pid);
-      }
-
-      targetStep.pid = null;
-      targetStep.pids = [];
-      targetStep.exitCode = null;
-      targetStep.signaled = false;
-
-      // Reset the calling step too
-      const callingStepName = Object.keys(run.steps).find(name => {
-        const s = run.steps[name];
-        return s.status === 'running';
-      });
-      if (callingStepName) {
-        run.steps[callingStepName].status = 'waiting_bounce';
-      }
-
-      saveRun(cwd, f.replace('.json', ''), run);
-      return { success: true, bounceCount: targetStep.bounces, maxBounces };
-    } catch { /* skip */ }
+  if (resolvedRunId) {
+    run = getRun(cwd, resolvedRunId);
+  } else {
+    const dir = join(cwd, RUNS_DIR);
+    if (!existsSync(dir)) return { success: false };
+    for (const f of readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('.signal-'))) {
+      try {
+        const r = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
+        if (r.status === 'running' && r.steps[targetStepName]) {
+          run = r;
+          resolvedRunId = f.replace('.json', '');
+          break;
+        }
+      } catch { /* skip */ }
+    }
   }
 
-  return { success: false };
+  if (!run || run.status !== 'running') return { success: false };
+
+  const targetStep = run.steps[targetStepName];
+  if (!targetStep) return { success: false };
+
+  // Check bounce limit (read-only check — safe without lock)
+  const pipeline = getPipeline(run.cwd || cwd, run.pipeline);
+  const stepDef = pipeline?.steps.find(s => s.name === targetStepName);
+  const maxBounces = stepDef?.maxBounces ?? 2;
+
+  if (targetStep.bounces >= maxBounces) {
+    return { success: false, bounceCount: targetStep.bounces, maxBounces };
+  }
+
+  // Find the calling step name (the step that's bouncing back)
+  const callingStepName = Object.keys(run.steps).find(name =>
+    run.steps[name].status === 'running' && name !== targetStepName,
+  );
+
+  // Write signal file — daemon will apply the state changes and kill processes
+  writeSignal(cwd, resolvedRunId, {
+    type: 'BOUNCE_BACK',
+    stepName: targetStepName,
+    callingStepName: callingStepName || null,
+    reason,
+  });
+
+  return { success: true, bounceCount: targetStep.bounces + 1, maxBounces };
 }
