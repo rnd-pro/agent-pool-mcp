@@ -31,7 +31,8 @@
     "cron",
     "ai"
   ],
-  "author": "Vladislav Matiyasevich",
+  "author": "RND-PRO",
+  "homepage": "https://github.com/rnd-pro/agent-pool-mcp",
   "license": "MIT",
   "repository": {
     "type": "git",
