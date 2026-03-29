@@ -4,9 +4,7 @@
 
 # agent-pool-mcp
 
-**MCP server for multi-agent orchestration** — parallel task delegation, sequential pipelines, cron scheduling, and cross-model peer review via [Gemini CLI](https://github.com/google-gemini/gemini-cli).
-
-> Developed by [RND-PRO](https://rnd-pro.com)
+Multi-agent orchestration via [Gemini CLI](https://github.com/google-gemini/gemini-cli) — parallel task delegation, sequential pipelines, cron scheduling, and cross-model peer review.
 
 Compatible with [Antigravity](https://antigravity.dev), Cursor, Windsurf, Claude Code, and any MCP-enabled coding agent.
 
