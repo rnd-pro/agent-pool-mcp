@@ -439,6 +439,20 @@ export function formatTaskResult(taskId) {
     if (result.errors?.length > 0) {
       sections.push(`### Errors\n\n${result.errors.join('\n')}`);
     }
+    // Include stderr diagnostics (rate limits, etc.)
+    if (entry.stderr) {
+      const rateLimitCount = (entry.stderr.match(/429|Too Many Requests|RESOURCE_EXHAUSTED/gi) || []).length;
+      if (rateLimitCount > 0) {
+        sections.push(`### Cause: Rate Limit\n\n⚡ **${rateLimitCount} rate limit errors (429)** during execution. Task failed because API quota was exhausted.\n\n💡 Wait a few minutes for quota to reset, then retry.`);
+      } else {
+        const stderrLines = entry.stderr.trim().split('\n')
+          .filter((l) => !l.includes('IDEClient') && !l.includes('YOLO mode') && !l.includes('Loaded cached') && l.trim())
+          .slice(-5);
+        if (stderrLines.length > 0) {
+          sections.push(`### Stderr\n\n\`\`\`\n${stderrLines.join('\n')}\n\`\`\``);
+        }
+      }
+    }
     const errorSignal = (result.errors ?? []).join(' ');
     sections.push(`### Recovery\n\n${classifyError(errorSignal || `exit code ${result.exitCode}`)}`);
   }
