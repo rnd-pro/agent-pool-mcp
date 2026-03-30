@@ -353,7 +353,10 @@ export function formatTaskResult(taskId) {
       // Count rate limit occurrences
       const rateLimitCount = (raw.match(/429|Too Many Requests|RESOURCE_EXHAUSTED/gi) || []).length;
 
-      // Extract retry delay from stderr formats:
+      // Forward-compatible: extract retry delay if present in stderr.
+      // Currently Google SDK does NOT include retryDelayMs in console.error output,
+      // but if Gemini CLI or SDK adds it in the future, this parser will pick it up.
+      // Supported formats:
       // retryDelay: '42s'  (Google API RetryInfo)
       // retryDelayMs: 42000  (Gemini CLI error object)
       // Retry-After: 30  (HTTP header)
