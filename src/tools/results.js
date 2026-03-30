@@ -345,12 +345,31 @@ export function formatTaskResult(taskId) {
       }
     }
 
-    // Stderr diagnostics — show rate limits, errors
+    // Stderr diagnostics — parse rate limits, extract actionable info
     let stderrInfo = '';
     if (entry.stderr) {
-      const lines = entry.stderr.trim().split('\n').filter((l) => !l.includes('IDEClient') && l.trim()).slice(-3);
-      if (lines.length > 0) {
-        stderrInfo = `\n📋 stderr: ${lines.join(' | ').substring(0, 200)}`;
+      const raw = entry.stderr;
+
+      // Count rate limit occurrences
+      const rateLimitCount = (raw.match(/429|Too Many Requests|RESOURCE_EXHAUSTED/gi) || []).length;
+
+      // Extract retry delay if present (e.g. "retryDelay": "30s" or retry_delay or Retry-After)
+      const retryMatch = raw.match(/retry[_-]?[Dd]elay["':\s]*(\d+)/i)
+        || raw.match(/Retry-After["':\s]*(\d+)/i);
+      const retryDelay = retryMatch ? retryMatch[1] : null;
+
+      if (rateLimitCount > 0) {
+        const parts = [`⚡ Rate limited (429 × ${rateLimitCount})`];
+        if (retryDelay) parts.push(`retry in ${retryDelay}s`);
+        stderrInfo = `\n${parts.join(' — ')}`;
+      } else {
+        // Show other errors (non-rate-limit)
+        const lines = raw.trim().split('\n')
+          .filter((l) => !l.includes('IDEClient') && !l.includes('YOLO mode') && !l.includes('Loaded cached') && l.trim())
+          .slice(-3);
+        if (lines.length > 0) {
+          stderrInfo = `\n📋 stderr: ${lines.join(' | ').substring(0, 200)}`;
+        }
       }
     }
 
