@@ -353,14 +353,25 @@ export function formatTaskResult(taskId) {
       // Count rate limit occurrences
       const rateLimitCount = (raw.match(/429|Too Many Requests|RESOURCE_EXHAUSTED/gi) || []).length;
 
-      // Extract retry delay if present (e.g. "retryDelay": "30s" or retry_delay or Retry-After)
-      const retryMatch = raw.match(/retry[_-]?[Dd]elay["':\s]*(\d+)/i)
-        || raw.match(/Retry-After["':\s]*(\d+)/i);
-      const retryDelay = retryMatch ? retryMatch[1] : null;
+      // Extract retry delay from stderr formats:
+      // retryDelay: '42s'  (Google API RetryInfo)
+      // retryDelayMs: 42000  (Gemini CLI error object)
+      // Retry-After: 30  (HTTP header)
+      let retrySeconds = null;
+      const msMatch = raw.match(/retryDelayMs[:"'\s]*(\d+)/i);
+      const secMatch = raw.match(/retryDelay[:"'\s]*'?(\d+)s'?/i);
+      const headerMatch = raw.match(/Retry-After[:"'\s]*(\d+)/i);
+      if (msMatch) retrySeconds = Math.ceil(parseInt(msMatch[1]) / 1000);
+      else if (secMatch) retrySeconds = parseInt(secMatch[1]);
+      else if (headerMatch) retrySeconds = parseInt(headerMatch[1]);
 
       if (rateLimitCount > 0) {
         const parts = [`⚡ Rate limited (429 × ${rateLimitCount})`];
-        if (retryDelay) parts.push(`retry in ${retryDelay}s`);
+        if (retrySeconds) {
+          const resetAt = new Date(Date.now() + retrySeconds * 1000);
+          const resetTime = resetAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+          parts.push(`resets ~${resetTime} (${retrySeconds}s)`);
+        }
         stderrInfo = `\n${parts.join(' — ')}`;
       } else {
         // Show other errors (non-rate-limit)
