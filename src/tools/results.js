@@ -77,6 +77,8 @@ export function createTask(taskId, prompt, waitHint, approvalMode) {
     waitHint: waitHint ?? null,
     pid: null,
     liveEvents: [],
+    lastEventAt: null,
+    stderr: '',
   });
 }
 
@@ -90,9 +92,27 @@ export function pushTaskEvent(taskId, event) {
   const entry = taskStore.get(taskId);
   if (entry && entry.status === 'running') {
     entry.liveEvents.push(event);
+    entry.lastEventAt = Date.now();
     // Ring buffer: keep only the last MAX_LIVE_EVENTS
     if (entry.liveEvents.length > MAX_LIVE_EVENTS) {
       entry.liveEvents = entry.liveEvents.slice(-MAX_LIVE_EVENTS);
+    }
+  }
+}
+
+/**
+ * Append stderr data to a task (for diagnostics).
+ *
+ * @param {string} taskId
+ * @param {string} chunk - stderr chunk
+ */
+export function pushTaskStderr(taskId, chunk) {
+  const entry = taskStore.get(taskId);
+  if (entry && entry.status === 'running') {
+    entry.stderr += chunk;
+    // Keep only last 2KB of stderr
+    if (entry.stderr.length > 2048) {
+      entry.stderr = entry.stderr.slice(-2048);
     }
   }
 }
@@ -316,6 +336,35 @@ export function formatTaskResult(taskId) {
       progress = '\n\n⏳ *Cold start — Gemini CLI initialization takes ~15-20s*';
     }
 
+    // Time since last event — key diagnostic
+    let activityInfo = '';
+    if (entry.lastEventAt) {
+      const silentSec = ((Date.now() - entry.lastEventAt) / 1000).toFixed(0);
+      if (parseInt(silentSec) > 60) {
+        activityInfo = `\n⏱️ Last event ${silentSec}s ago — model may be thinking or rate-limited.`;
+      }
+    }
+
+    // Stderr diagnostics — show rate limits, errors
+    let stderrInfo = '';
+    if (entry.stderr) {
+      const lines = entry.stderr.trim().split('\n').filter((l) => !l.includes('IDEClient') && l.trim()).slice(-3);
+      if (lines.length > 0) {
+        stderrInfo = `\n📋 stderr: ${lines.join(' | ').substring(0, 200)}`;
+      }
+    }
+
+    // PID alive check
+    let pidStatus = '';
+    if (entry.pid) {
+      try {
+        process.kill(entry.pid, 0); // signal 0 = check alive
+        pidStatus = ' (alive)';
+      } catch {
+        pidStatus = ' (dead ⚠️)';
+      }
+    }
+
     // System load awareness during polling
     const load = getSystemLoad();
     const loadInfo = load.warning ? `\n\n${load.warning}` : '';
@@ -325,7 +374,7 @@ export function formatTaskResult(taskId) {
     return {
       content: [{
         type: 'text',
-        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}${progress}\n\n💡 **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
+        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}\n- **PID**: ${entry.pid ?? 'unknown'}${pidStatus}${activityInfo}${stderrInfo}${progress}\n\n💡 **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
       }],
     };
   }

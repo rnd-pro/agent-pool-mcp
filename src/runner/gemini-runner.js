@@ -10,7 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { getRunner, loadConfig } from './config.js';
 import { buildSshSpawn, parseRemotePid } from './ssh.js';
-import { setTaskPid, updateTaskResult, pushTaskEvent } from '../tools/results.js';
+import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 
 const DEFAULT_TIMEOUT_SEC = 600;
 const DEFAULT_APPROVAL_MODE = 'yolo';
@@ -160,6 +160,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     child.stderr.on('data', (chunk) => {
       stderrData += chunk.toString();
+      if (taskId) pushTaskStderr(taskId, chunk.toString());
     });
 
     child.on('close', (code) => {
