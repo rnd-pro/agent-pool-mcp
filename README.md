@@ -183,12 +183,20 @@ See [parallel-work guide](examples/parallel-work.md) and built-in `orchestrator`
 
 ## MCP Ecosystem
 
-Best used together with [**project-graph-mcp**](https://www.npmjs.com/package/project-graph-mcp) — AST-based codebase analysis:
+Best used as part of [**mcp-agent-portal**](https://github.com/rnd-pro/mcp-agent-portal) — a unified MCP aggregator that bundles agent-pool, project-graph, and other servers behind a single config entry:
 
-| Layer | agent-pool-mcp | project-graph-mcp |
-|-------|---------------|-------------------|
-| **Primary IDE agent** | Delegates tasks, consults peer | Navigates codebase, runs analysis |
-| **Gemini CLI workers** | Executes delegated tasks | Available as MCP tool inside workers |
+```json
+{
+  "mcpServers": {
+    "agent-portal": {
+      "command": "npx",
+      "args": ["-y", "mcp-agent-portal"]
+    }
+  }
+}
+```
+
+Also works standalone alongside [**project-graph-mcp**](https://www.npmjs.com/package/project-graph-mcp) — AST-based codebase analysis:
 
 ```json
 {
@@ -214,6 +222,7 @@ Best used together with [**project-graph-mcp**](https://www.npmjs.com/package/pr
 - [examples/parallel-work.md](examples/parallel-work.md) — Delegation patterns and best practices
 
 ## Related Projects
+- [mcp-agent-portal](https://github.com/rnd-pro/mcp-agent-portal) — Unified MCP aggregator + web dashboard + AI agent runtime
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
 - [JSDA-Kit](https://github.com/rnd-pro/jsda-kit) — SSG/SSR toolkit for modern web applications
