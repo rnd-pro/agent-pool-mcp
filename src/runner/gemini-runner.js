@@ -130,6 +130,27 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       }, timeoutMs);
     }
 
+    child.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      
+      const errMsg = `Failed to start agent process: ${err.message}`;
+      if (taskId) pushTaskStderr(taskId, errMsg);
+      
+      resolve({
+        sessionId: null,
+        response: '',
+        stats: null,
+        toolCalls: [],
+        toolResults: [],
+        errors: [errMsg],
+        exitCode: -1,
+        totalEvents: 0,
+        softTimeout: false,
+      });
+    });
+
     child.stdout.on('data', (chunk) => {
       buffer += chunk.toString();
       const lines = buffer.split('\n');

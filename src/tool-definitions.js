@@ -144,12 +144,21 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: 'list_tasks',
+    description: 'List all background tasks currently running or recently completed in the agent pool memory.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
     name: 'list_skills',
     description: 'List available Gemini CLI skills from all tiers: project (.gemini/skills/), user-global (~/.gemini/skills/), and built-in (shipped with agent-pool). Shows tier label for each skill.',
     inputSchema: {
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
     },
   },
@@ -164,6 +173,7 @@ export const TOOL_DEFINITIONS = [
         instructions: { type: 'string', description: 'Full markdown instructions for the skill. Define the agent role, rules, and output format.' },
         scope: { type: 'string', enum: ['project', 'global'], description: 'Where to save: "project" (default, .gemini/skills/) or "global" (~/.gemini/skills/).' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['skill_name', 'description', 'instructions'],
     },
@@ -177,6 +187,7 @@ export const TOOL_DEFINITIONS = [
         skill_name: { type: 'string', description: 'Skill name to delete.' },
         scope: { type: 'string', enum: ['project', 'global'], description: 'Tier to delete from: "project" (default) or "global".' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['skill_name'],
     },
@@ -189,6 +200,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         skill_name: { type: 'string', description: 'Skill name to install (e.g. "code-reviewer").' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['skill_name'],
     },
@@ -228,6 +240,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
     },
   },
@@ -239,6 +252,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         schedule_id: { type: 'string', description: 'Schedule ID to cancel.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['schedule_id'],
     },
@@ -251,6 +265,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         schedule_id: { type: 'string', description: 'Filter results by schedule ID. Omit to get all.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
     },
   },
@@ -282,6 +297,7 @@ export const TOOL_DEFINITIONS = [
         },
         on_error: { type: 'string', enum: ['stop', 'skip'], description: 'What to do on error. Default is stop.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['name', 'steps'],
     },
@@ -294,6 +310,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         pipeline_id: { type: 'string', description: 'Pipeline ID to run.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['pipeline_id'],
     },
@@ -305,6 +322,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
     },
   },
@@ -316,6 +334,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         run_id: { type: 'string', description: 'Pipeline run ID.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['run_id'],
     },
@@ -328,6 +347,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         run_id: { type: 'string', description: 'Pipeline run ID to cancel.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['run_id'],
     },
@@ -342,6 +362,7 @@ export const TOOL_DEFINITIONS = [
         run_id: { type: 'string', description: 'Pipeline run ID for precise targeting. Provided in the task prompt.' },
         output: { type: 'string', description: 'Optional output message or result.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['step_name'],
     },
@@ -356,6 +377,7 @@ export const TOOL_DEFINITIONS = [
         reason: { type: 'string', description: 'Feedback about missing/insufficient data.' },
         run_id: { type: 'string', description: 'Pipeline run ID for precise targeting. Provided in the task prompt.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['step_name', 'reason'],
     },
@@ -374,6 +396,7 @@ export const TOOL_DEFINITIONS = [
         max_agents: { type: 'number', description: 'Max concurrent agents allowed in this group.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories agents in this group can access.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
       required: ['name'],
     },
@@ -385,6 +408,7 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
     },
   },

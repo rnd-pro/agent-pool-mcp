@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
 import { getSystemLoad } from './runner/process-manager.js';
-import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, cancelTask } from './tools/results.js';
+import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, cancelTask, setNotifyCallback } from './tools/results.js';
 import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
@@ -117,6 +117,20 @@ export function createServer() {
     { capabilities: { tools: {}, resources: {} } },
   );
 
+  // Push task lifecycle events as JSON-RPC notifications via stderr.
+  // stdout is owned by MCP SDK's StdioServerTransport — writing there
+  // causes message interleaving. stderr is our side-channel: the proxy
+  // catches these from child.stderr and routes to WS chat clients.
+  setNotifyCallback((taskId, type, data) => {
+    fs.appendFileSync('notify.log', `Notifying ${type} for ${taskId}\n`);
+    const line = JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/task/event',
+      params: { taskId, type, data },
+    });
+    process.stderr.write(`__TASK_NOTIFY__${line}\n`);
+  });
+
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
     resources: [{
       uri: 'agent-pool://guide',
@@ -165,6 +179,8 @@ export function createServer() {
           response = formatTaskResult(args.task_id); break;
         case 'cancel_task':
           response = cancelTask(args.task_id); break;
+        case 'list_tasks':
+          response = { content: [{ type: 'text', text: JSON.stringify(listAllTasks(), null, 2) }] }; break;
         case 'consult_peer':
           response = consultPeer(args, defaultCwd); break;
         case 'list_sessions':
@@ -363,6 +379,8 @@ async function handleListSessions(args) {
 /** @param {object} args */
 function handleListSkills(args) {
   const skills = listSkills(args.cwd ?? defaultCwd);
+  if (args.json) { return { content: [{ type: "text", text: JSON.stringify(skills) }] }; }
+  
   if (skills.length === 0) {
     return { content: [{ type: 'text', text: 'No skills found. Use create_skill to create one.' }] };
   }
@@ -537,6 +555,7 @@ function handleListPipelines(args) {
   const cwd = args.cwd ?? defaultCwd;
   const pipelines = listPipelines(cwd);
   const runs = listRuns(cwd);
+  if (args.json) { return { content: [{ type: "text", text: JSON.stringify(pipelines) }] }; }
   
   const parts = [];
 
@@ -733,6 +752,7 @@ function handleCreateGroup(args) {
 function handleListGroups(args) {
   const cwd = args.cwd ?? defaultCwd;
   const groups = listGroups(cwd);
+  if (args.json) { return { content: [{ type: "text", text: JSON.stringify(groups) }] }; }
 
   if (groups.length === 0) {
     return { content: [{ type: 'text', text: 'No groups defined. Use `create_group` to create one.' }] };

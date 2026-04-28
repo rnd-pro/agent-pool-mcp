@@ -16,6 +16,17 @@ const MAX_LIVE_EVENTS = 200;
 /** TTL for completed tasks in ms (10 minutes) */
 const TASK_TTL_MS = 10 * 60 * 1000;
 
+/** @type {((taskId: string, type: string, data?: object) => void)|null} */
+let _notifyCallback = null;
+
+/**
+ * Set a callback that fires on task lifecycle events (for WebSocket push).
+ * @param {(taskId: string, type: string, data?: object) => void} cb
+ */
+export function setNotifyCallback(cb) {
+  _notifyCallback = cb;
+}
+
 // ─── Error classification for retry hints ───────────────────
 
 /**
@@ -97,6 +108,7 @@ export function pushTaskEvent(taskId, event) {
     if (entry.liveEvents.length > MAX_LIVE_EVENTS) {
       entry.liveEvents = entry.liveEvents.slice(-MAX_LIVE_EVENTS);
     }
+    if (_notifyCallback) _notifyCallback(taskId, 'event', event);
   }
 }
 
@@ -141,6 +153,7 @@ export function completeTask(taskId, result) {
     entry.result = result;
     entry.completedAt = Date.now();
     entry.pid = null;
+    if (_notifyCallback) _notifyCallback(taskId, 'done', result);
   }
 }
 
@@ -172,6 +185,7 @@ export function failTask(taskId, errorMessage) {
     entry.error = errorMessage;
     entry.completedAt = Date.now();
     entry.pid = null;
+    if (_notifyCallback) _notifyCallback(taskId, 'error', { error: errorMessage });
   }
 }
 
@@ -247,6 +261,26 @@ export function getActiveTasks() {
     });
   if (active.length === 0) return null;
   return `\n\n---\n📋 **Active tasks (${active.length})**:\n${active.join('\n')}`;
+}
+
+/**
+ * Get all tasks for the list_tasks MCP tool.
+ *
+ * @returns {Array} Array of task objects
+ */
+export function listAllTasks() {
+  return [...taskStore.entries()].map(([id, entry]) => ({
+    id,
+    status: entry.status,
+    prompt: entry.prompt,
+    pid: entry.pid,
+    startedAt: entry.startedAt,
+    elapsedMs: Date.now() - entry.startedAt,
+    runner: entry.runner,
+    skill: entry.skill,
+    model: entry.model,
+    error: entry.error
+  }));
 }
 
 /**
