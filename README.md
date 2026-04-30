@@ -183,7 +183,9 @@ See [parallel-work guide](examples/parallel-work.md) and built-in `orchestrator`
 
 ## MCP Ecosystem
 
-Best used as part of [**mcp-agent-portal**](https://github.com/rnd-pro/mcp-agent-portal) — a unified MCP aggregator that bundles agent-pool, project-graph, and other servers behind a single config entry:
+## MCP Ecosystem
+
+Best used as part of [**mcp-agent-portal**](https://github.com/rnd-pro/mcp-agent-portal) — a unified MCP aggregator that combines all RND-PRO servers behind a single config entry:
 
 ```json
 {
@@ -196,22 +198,10 @@ Best used as part of [**mcp-agent-portal**](https://github.com/rnd-pro/mcp-agent
 }
 ```
 
-Also works standalone alongside [**project-graph-mcp**](https://www.npmjs.com/package/project-graph-mcp) — AST-based codebase analysis:
+> [!TIP]
+> The Portal runs a **singleton backend** to prevent resource exhaustion when you open multiple IDE windows. It transparently spawns `agent-pool-mcp` and `project-graph-mcp` as child processes and aggregates their tools.
 
-```json
-{
-  "mcpServers": {
-    "agent-pool": {
-      "command": "npx",
-      "args": ["-y", "agent-pool-mcp"]
-    },
-    "project-graph": {
-      "command": "npx",
-      "args": ["-y", "project-graph-mcp"]
-    }
-  }
-}
-```
+Also works standalone alongside [**project-graph-mcp**](https://www.npmjs.com/package/project-graph-mcp) — AST-based codebase analysis:
 
 > [!IMPORTANT]
 > Each Gemini CLI worker gets its own MCP server instance but shares pipeline state via filesystem — no coordination overhead.
