@@ -183,8 +183,6 @@ See [parallel-work guide](examples/parallel-work.md) and built-in `orchestrator`
 
 ## MCP Ecosystem
 
-## MCP Ecosystem
-
 Best used as part of [**mcp-agent-portal**](https://github.com/rnd-pro/mcp-agent-portal) — a unified MCP aggregator that combines all RND-PRO servers behind a single config entry:
 
 ```json
