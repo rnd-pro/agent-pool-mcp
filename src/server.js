@@ -16,6 +16,7 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
+import { runOpencodeStreaming } from './runner/opencode-runner.js';
 import { getSystemLoad } from './runner/process-manager.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, cancelTask, setNotifyCallback } from './tools/results.js';
 import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
@@ -25,12 +26,13 @@ import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun
 import { createGroup, listGroups, getGroup } from './tools/groups.js';
 import { sendMessage, getMessages } from './tools/messaging.js';
 
-import { TOOL_DEFINITIONS } from './tool-definitions.js';
+import { getToolDefinitions } from './tool-definitions.js';
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +41,7 @@ const defaultCwd = process.cwd();
 // ─── Prerequisite check (cached at startup) ──────────────────
 
 let geminiAvailable = null;
+let opencodeAvailable = null;
 
 function checkGemini() {
   if (geminiAvailable !== null) return geminiAvailable;
@@ -49,6 +52,61 @@ function checkGemini() {
     geminiAvailable = false;
   }
   return geminiAvailable;
+}
+
+function checkOpencode() {
+  if (opencodeAvailable !== null) return opencodeAvailable;
+  try {
+    execFileSync('which', ['opencode'], { encoding: 'utf-8', timeout: 2000 });
+    opencodeAvailable = true;
+  } catch {
+    opencodeAvailable = false;
+  }
+  return opencodeAvailable;
+}
+
+// ─── Dynamic model discovery (cached) ────────────────────────
+
+let _cachedModels = [];
+
+/**
+ * Discover available models from OpenCode CLI + user config.
+ * Non-blocking, caches results.
+ * @returns {Promise<string[]>}
+ */
+function discoverModels() {
+  return new Promise((resolve) => {
+    // 1. Try user config first
+    try {
+      let configPath = path.join(os.homedir(), '.gemini', 'agent-portal.json');
+      if (fs.existsSync(configPath)) {
+        let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        let userModels = config.providerModels?.opencode;
+        if (Array.isArray(userModels) && userModels.length > 0) {
+          _cachedModels = userModels;
+          resolve(userModels);
+          return;
+        }
+      }
+    } catch {}
+
+    // 2. Fallback: discover from OpenCode CLI
+    if (!checkOpencode()) {
+      resolve([]);
+      return;
+    }
+    execFile('opencode', ['models'], { timeout: 10000 }, (err, stdout) => {
+      if (err) {
+        resolve([]);
+        return;
+      }
+      let models = stdout.split('\n')
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith('INFO') && !l.startsWith('WARN'));
+      _cachedModels = models;
+      resolve(models);
+    });
+  });
 }
 
 const GEMINI_REQUIRED_ERROR = {
@@ -108,6 +166,11 @@ export function createServer() {
   // Check gemini once at server creation
   checkGemini();
 
+  // Async model discovery (non-blocking, populates _cachedModels for tools/list)
+  discoverModels().then(m => {
+    if (m.length > 0) console.error(`[agent-pool] Discovered ${m.length} models for tool schema`);
+  }).catch(() => {});
+
   if (CURRENT_DEPTH > 0) {
     console.error(`[agent-pool] Nested orchestration: depth=${CURRENT_DEPTH}${MAX_DEPTH !== null ? `, max=${MAX_DEPTH}` : ''}`);
   }
@@ -156,7 +219,7 @@ export function createServer() {
   });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOL_DEFINITIONS,
+    tools: getToolDefinitions({ openCodeModels: _cachedModels }),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -323,7 +386,11 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
 
   createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode);
 
-  runGeminiStreaming(taskOpts)
+  // Route to the correct runner based on provider
+  const provider = args.provider || 'gemini';
+  const runFn = provider === 'opencode' ? runOpencodeStreaming : runGeminiStreaming;
+
+  runFn(taskOpts)
     .then((result) => completeTask(taskId, result))
     .catch((err) => failTask(taskId, err.message));
 

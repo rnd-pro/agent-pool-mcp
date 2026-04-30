@@ -477,8 +477,11 @@ export function formatTaskResult(taskId) {
     sections.push(`> ⏳ **Soft timeout** reached after ${result.timeoutSeconds}s. Process may still be running — partial result below.`);
   }
 
-  // Agent failed with non-zero exit and no response — show diagnostic info
-  if (result.exitCode && result.exitCode !== 0 && !result.response) {
+  // Agent failed to produce a response (either non-zero exit or caught error)
+  const hasErrorExit = result.exitCode && result.exitCode !== 0;
+  const hasCaughtErrors = result.errors && result.errors.length > 0;
+  
+  if ((hasErrorExit || hasCaughtErrors) && !result.response) {
     sections.push(`## ⚠️ Agent Failed (exit code ${result.exitCode})\n\nThe agent process terminated without producing a response.`);
     if (result.toolCalls?.length > 0) {
       const lastTools = result.toolCalls.slice(-5).map((t) => `- \`${t.name}\``).join('\n');

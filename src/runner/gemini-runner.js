@@ -87,6 +87,14 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     const child = spawn(spawnCmd, spawnArgs, spawnOpts);
 
+    if (taskId) {
+      pushTaskEvent(taskId, {
+        type: 'message',
+        role: 'system',
+        content: `⏳ Spawning Gemini process${isRemote ? ' via SSH' : ''}...`
+      });
+    }
+
     trackChild(child.pid, taskId ?? 'streaming', `gemini-${isRemote ? 'ssh' : 'local'}`);
     if (taskId) setTaskPid(taskId, child.pid);
 
@@ -96,6 +104,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     let timeoutHandle;
     let remotePid = null;
     let resolved = false;
+    let hasReceivedData = false;
 
     if (timeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
@@ -152,6 +161,14 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     });
 
     child.stdout.on('data', (chunk) => {
+      if (!hasReceivedData && taskId) {
+        hasReceivedData = true;
+        pushTaskEvent(taskId, {
+          type: 'message',
+          role: 'system',
+          content: '✅ Connected to Gemini CLI stream...'
+        });
+      }
       buffer += chunk.toString();
       const lines = buffer.split('\n');
       buffer = lines.pop();

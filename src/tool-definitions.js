@@ -4,8 +4,30 @@
  *
  * @module agent-pool/tool-definitions
  */
+/**
+ * Build model description string for tool schema.
+ * @param {string[]} models
+ * @returns {string}
+ */
+function modelDescription(models) {
+  if (!models || models.length === 0) {
+    return 'Model to use in provider/model format (e.g. openrouter/deepseek/deepseek-v3.2). Leave empty for default.';
+  }
+  let sample = models.slice(0, 10).join(', ');
+  let suffix = models.length > 10 ? ` ... and ${models.length - 10} more` : '';
+  return `Model to use. Available: ${sample}${suffix}. Leave empty for default.`;
+}
 
-export const TOOL_DEFINITIONS = [
+/**
+ * Generate tool definitions with dynamic model context.
+ * @param {{ openCodeModels?: string[] }} [ctx]
+ * @returns {Array}
+ */
+export function getToolDefinitions(ctx = {}) {
+  let ocModels = ctx.openCodeModels || [];
+  let modelDesc = modelDescription(ocModels);
+
+  return [
   {
     name: 'get_usage_guide',
     description: [
@@ -42,8 +64,9 @@ export const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'The task description for the Gemini agent. Be specific and detailed.' },
+        provider: { type: 'string', enum: ['gemini', 'opencode'], description: 'CLI provider to use. gemini = Gemini CLI, opencode = OpenCode CLI. Default: gemini.' },
         cwd: { type: 'string', description: 'Working directory for the agent. Defaults to current working directory.' },
-        model: { type: 'string', description: 'Model to use. Options: gemini-3.1-pro-preview, gemini-3-flash-preview. Leave empty for Auto mode.' },
+        model: { type: 'string', description: modelDesc },
         approval_mode: {
           type: 'string',
           enum: ['yolo', 'auto_edit', 'plan'],
@@ -78,7 +101,8 @@ export const TOOL_DEFINITIONS = [
       properties: {
         prompt: { type: 'string', description: 'The analysis task for the Gemini agent.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
-        model: { type: 'string', description: 'Model to use. Leave empty for Auto.' },
+        provider: { type: 'string', enum: ['gemini', 'opencode'], description: 'CLI provider to use. Default: gemini.' },
+        model: { type: 'string', description: modelDesc },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
         session_id: { type: 'string', description: 'Resume an existing Gemini CLI session by its UUID. Use list_sessions to see available sessions.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
@@ -478,3 +502,7 @@ export const TOOL_DEFINITIONS = [
     },
   },
 ];
+}
+
+/** Backward compat: static export using default context */
+export const TOOL_DEFINITIONS = getToolDefinitions();
