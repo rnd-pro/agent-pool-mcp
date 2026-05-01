@@ -13,10 +13,7 @@
 import { spawn } from 'node:child_process';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
-
-const DEFAULT_TIMEOUT_SEC = 600;
-
-export { DEFAULT_TIMEOUT_SEC as OPENCODE_DEFAULT_TIMEOUT_SEC };
+import { loadConfig } from './config.js';
 
 /**
  * Normalize an OpenCode JSON event into the unified format
@@ -93,7 +90,9 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
 
     args.push(prompt);
 
-    const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
+    const config = loadConfig();
+    const effectiveTimeout = timeout ?? config.limits.timeout;
+    const timeoutMs = effectiveTimeout * 1000;
 
     const spawnOpts = {
       cwd: cwd ?? process.cwd(),
@@ -123,9 +122,11 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
     let stderrData = '';
     let buffer = '';
     let timeoutHandle;
+    let hardTimeoutHandle;
     let resolved = false;
     let detectedSessionId = null;
     let hasReceivedData = false;
+    let stepCount = 0;
 
     if (timeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
@@ -145,15 +146,28 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
           exitCode: null,
           totalEvents: events.length,
           softTimeout: true,
-          timeoutSeconds: timeout ?? DEFAULT_TIMEOUT_SEC,
+          timeoutSeconds: effectiveTimeout,
         });
       }, timeoutMs);
+
+      // Hard timeout safety net — kill process group to prevent infinite zombies
+      const hardTimeoutMs = Math.min(
+        timeoutMs * config.limits.hardTimeoutMultiplier,
+        config.limits.hardTimeoutMax * 1000,
+      );
+      hardTimeoutHandle = setTimeout(() => {
+        if (child.exitCode === null) {
+          console.error(`[opencode-runner] HARD TIMEOUT: killing PID ${child.pid} after ${hardTimeoutMs / 1000}s`);
+          killGroup(child.pid);
+        }
+      }, hardTimeoutMs);
     }
 
     child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
 
       const errMsg = `Failed to start opencode process: ${err.message}`;
       if (taskId) pushTaskStderr(taskId, errMsg);
@@ -197,6 +211,15 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
             detectedSessionId = parsed.sessionID;
           }
 
+          // Max steps safety — kill runaway agents
+          if (parsed.type === 'step_finish') {
+            stepCount++;
+            if (stepCount >= config.limits.maxSteps && child.exitCode === null) {
+              console.error(`[opencode-runner] MAX STEPS (${config.limits.maxSteps}) reached — killing PID ${child.pid}`);
+              killGroup(child.pid);
+            }
+          }
+
           // Normalize and push to task tracker for live streaming
           if (taskId) {
             const normalized = normalizeEvent(parsed);
@@ -221,6 +244,7 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
 
     child.on('close', (code) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       untrackChild(child.pid);
 
       // Process remaining buffer

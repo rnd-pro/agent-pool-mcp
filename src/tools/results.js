@@ -27,6 +27,28 @@ export function setNotifyCallback(cb) {
   _notifyCallback = cb;
 }
 
+/**
+ * Build a lightweight metadata snapshot for notification callbacks.
+ * The portal uses this to mirror task state into StateGraph.
+ *
+ * @param {string} taskId
+ * @returns {object|null}
+ */
+function getTaskMeta(taskId) {
+  const entry = taskStore.get(taskId);
+  if (!entry) return null;
+  return {
+    status: entry.status,
+    prompt: (entry.prompt || '').substring(0, 200),
+    pid: entry.pid,
+    approvalMode: entry.approvalMode,
+    startedAt: entry.startedAt,
+    completedAt: entry.completedAt,
+    error: entry.error,
+    eventCount: entry.liveEvents?.length ?? 0,
+  };
+}
+
 // ─── Error classification for retry hints ───────────────────
 
 /**
@@ -91,6 +113,7 @@ export function createTask(taskId, prompt, waitHint, approvalMode) {
     lastEventAt: null,
     stderr: '',
   });
+  if (_notifyCallback) _notifyCallback(taskId, 'created', { meta: getTaskMeta(taskId) });
 }
 
 /**
@@ -137,7 +160,10 @@ export function pushTaskStderr(taskId, chunk) {
  */
 export function setTaskPid(taskId, pid) {
   const entry = taskStore.get(taskId);
-  if (entry) entry.pid = pid;
+  if (entry) {
+    entry.pid = pid;
+    if (_notifyCallback) _notifyCallback(taskId, 'pid', { pid, meta: getTaskMeta(taskId) });
+  }
 }
 
 /**
@@ -153,7 +179,7 @@ export function completeTask(taskId, result) {
     entry.result = result;
     entry.completedAt = Date.now();
     entry.pid = null;
-    if (_notifyCallback) _notifyCallback(taskId, 'done', result);
+    if (_notifyCallback) _notifyCallback(taskId, 'done', { ...result, meta: getTaskMeta(taskId) });
   }
 }
 
@@ -185,7 +211,7 @@ export function failTask(taskId, errorMessage) {
     entry.error = errorMessage;
     entry.completedAt = Date.now();
     entry.pid = null;
-    if (_notifyCallback) _notifyCallback(taskId, 'error', { error: errorMessage });
+    if (_notifyCallback) _notifyCallback(taskId, 'error', { error: errorMessage, meta: getTaskMeta(taskId) });
   }
 }
 
@@ -218,6 +244,7 @@ export function cancelTask(taskId) {
   entry.status = 'cancelled';
   entry.completedAt = Date.now();
   entry.pid = null;
+  if (_notifyCallback) _notifyCallback(taskId, 'cancelled', { meta: getTaskMeta(taskId) });
 
   return {
     content: [{

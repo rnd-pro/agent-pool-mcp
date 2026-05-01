@@ -1,8 +1,13 @@
 /**
- * Runner configuration — loads and resolves runner definitions.
+ * Agent Pool configuration — single source of truth for all operational settings.
  *
- * Supports local and SSH runners. SSH config (keys, ports, jump hosts)
- * is handled by ~/.ssh/config — we only store host and remote cwd.
+ * Loads from agent-pool.config.json (project or global) and merges with defaults.
+ * All limits, safety, and runner settings are centralized here.
+ *
+ * Search order:
+ *   1. CWD/agent-pool.config.json (project-level)
+ *   2. ~/.config/agent-pool/config.json (global)
+ *   3. Built-in defaults
  *
  * @module agent-pool/runner/config
  */
@@ -19,23 +24,90 @@ import { homedir } from 'node:os';
  * @property {string} [cwd] - Remote working directory (for type=ssh)
  */
 
-/** Default model for all delegated tasks */
-const DEFAULT_MODEL = 'gemini-3.1-pro-preview';
+/**
+ * @typedef {object} LimitsConfig
+ * @property {number} timeout - Soft timeout in seconds (default: 600)
+ * @property {number} hardTimeoutMultiplier - Hard timeout = timeout × this (default: 2)
+ * @property {number} hardTimeoutMax - Hard timeout cap in seconds (default: 1800)
+ * @property {number} maxSteps - Max agent steps per task before kill (default: 50)
+ * @property {number} maxConcurrent - Max concurrent agent processes (default: 5)
+ * @property {number} maxDepth - Max orchestration depth (default: 3)
+ */
 
-const DEFAULT_CONFIG = {
+/**
+ * @typedef {object} SafetyConfig
+ * @property {string[]} badCwdList - CWD values to reject (default: ['/', '/tmp', '/private/tmp'])
+ * @property {string} defaultApprovalMode - Default approval mode (default: 'yolo')
+ */
+
+/**
+ * @typedef {object} HistoryConfig
+ * @property {number} retentionDays - Days to retain session history (default: 3)
+ * @property {boolean} autoCleanup - Auto-cleanup on startup (default: true)
+ */
+
+/**
+ * @typedef {object} AgentPoolConfig
+ * @property {RunnerDef[]} runners
+ * @property {string} defaultRunner
+ * @property {string} defaultModel
+ * @property {LimitsConfig} limits
+ * @property {SafetyConfig} safety
+ * @property {HistoryConfig} history
+ */
+
+/** @type {AgentPoolConfig} */
+const DEFAULTS = {
   runners: [{ id: 'local', type: 'local' }],
   defaultRunner: 'local',
-  defaultModel: DEFAULT_MODEL,
+  defaultModel: 'gemini-3.1-pro-preview',
+  limits: {
+    timeout: 600,
+    hardTimeoutMultiplier: 2,
+    hardTimeoutMax: 1800,
+    maxSteps: 50,
+    maxConcurrent: 5,
+    maxDepth: 3,
+  },
+  safety: {
+    badCwdList: ['/', '/tmp', '/private/tmp'],
+    defaultApprovalMode: 'yolo',
+  },
+  history: {
+    retentionDays: 3,
+    autoCleanup: true,
+  },
 };
 
-/** @type {{runners: RunnerDef[], defaultRunner: string}|null} */
+/** @type {AgentPoolConfig|null} */
 let cachedConfig = null;
 
 /**
- * Load runner config from agent-pool.config.json.
- * Search order: CWD, ~/.config/agent-pool/, fallback to default (local only).
+ * Deep merge two objects (1 level deep for sub-objects).
+ * @param {object} defaults
+ * @param {object} overrides
+ * @returns {object}
+ */
+function mergeConfig(defaults, overrides) {
+  let result = { ...defaults };
+  for (let key of Object.keys(overrides)) {
+    if (
+      result[key] && typeof result[key] === 'object' && !Array.isArray(result[key])
+      && overrides[key] && typeof overrides[key] === 'object' && !Array.isArray(overrides[key])
+    ) {
+      result[key] = { ...result[key], ...overrides[key] };
+    } else {
+      result[key] = overrides[key];
+    }
+  }
+  return result;
+}
+
+/**
+ * Load config from agent-pool.config.json, merged with defaults.
+ * Search order: CWD, ~/.config/agent-pool/, fallback to defaults.
  *
- * @returns {{runners: RunnerDef[], defaultRunner: string}}
+ * @returns {AgentPoolConfig}
  */
 export function loadConfig() {
   if (cachedConfig) return cachedConfig;
@@ -50,11 +122,7 @@ export function loadConfig() {
       try {
         const raw = fs.readFileSync(filePath, 'utf-8');
         const parsed = JSON.parse(raw);
-        cachedConfig = {
-          runners: parsed.runners ?? DEFAULT_CONFIG.runners,
-          defaultRunner: parsed.defaultRunner ?? 'local',
-          defaultModel: parsed.defaultModel ?? DEFAULT_MODEL,
-        };
+        cachedConfig = mergeConfig(DEFAULTS, parsed);
         console.error(`[agent-pool] Config loaded from ${filePath}`);
         return cachedConfig;
       } catch (err) {
@@ -63,7 +131,7 @@ export function loadConfig() {
     }
   }
 
-  cachedConfig = DEFAULT_CONFIG;
+  cachedConfig = { ...DEFAULTS };
   return cachedConfig;
 }
 
@@ -90,3 +158,4 @@ export function getRunner(runnerId) {
 export function resetConfig() {
   cachedConfig = null;
 }
+

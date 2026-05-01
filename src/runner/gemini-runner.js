@@ -12,10 +12,9 @@ import { getRunner, loadConfig } from './config.js';
 import { buildSshSpawn, parseRemotePid } from './ssh.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 
-const DEFAULT_TIMEOUT_SEC = 600;
 const DEFAULT_APPROVAL_MODE = 'yolo';
 
-export { DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE };
+export { DEFAULT_APPROVAL_MODE };
 
 
 /**
@@ -59,7 +58,9 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       }
     }
 
-    const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
+    const config = loadConfig();
+    const effectiveTimeout = timeout ?? config.limits.timeout;
+    const timeoutMs = effectiveTimeout * 1000;
 
     let spawnCmd, spawnArgs, spawnOpts;
 
@@ -102,13 +103,15 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     let stderrData = '';
     let buffer = '';
     let timeoutHandle;
+    let hardTimeoutHandle;
     let remotePid = null;
     let resolved = false;
     let hasReceivedData = false;
+    let stepCount = 0;
 
     if (timeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
-        // Soft timeout: resolve with partial data, let process continue in background
+        // Soft timeout: resolve with partial data
         clearTimeout(timeoutHandle);
         timeoutHandle = null;
         resolved = true;
@@ -133,16 +136,28 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
           exitCode: null,
           totalEvents: events.length,
           softTimeout: true,
-          timeoutSeconds: timeout ?? DEFAULT_TIMEOUT_SEC,
+          timeoutSeconds: effectiveTimeout,
         });
-        // Process continues running — will be cleaned up on natural exit
       }, timeoutMs);
+
+      // Hard timeout safety net — kill process group to prevent infinite zombies
+      const hardTimeoutMs = Math.min(
+        timeoutMs * config.limits.hardTimeoutMultiplier,
+        config.limits.hardTimeoutMax * 1000,
+      );
+      hardTimeoutHandle = setTimeout(() => {
+        if (child.exitCode === null) {
+          console.error(`[gemini-runner] HARD TIMEOUT: killing PID ${child.pid} after ${hardTimeoutMs / 1000}s`);
+          killGroup(child.pid);
+        }
+      }, hardTimeoutMs);
     }
 
     child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       
       const errMsg = `Failed to start agent process: ${err.message}`;
       if (taskId) pushTaskStderr(taskId, errMsg);
@@ -189,6 +204,16 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         try {
           const parsed = JSON.parse(trimmed);
           events.push(parsed);
+
+          // Max steps safety — kill runaway agents
+          if (parsed.type === 'result' || (parsed.type === 'message' && parsed.role === 'assistant')) {
+            stepCount++;
+            if (stepCount >= config.limits.maxSteps && child.exitCode === null) {
+              console.error(`[gemini-runner] MAX STEPS (${config.limits.maxSteps}) reached — killing PID ${child.pid}`);
+              killGroup(child.pid);
+            }
+          }
+
           if (taskId) pushTaskEvent(taskId, parsed);
         } catch {
           // Skip non-JSON lines
@@ -203,6 +228,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     child.on('close', (code) => {
       clearTimeout(timeoutHandle);
+      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       untrackChild(child.pid);
 
       // If already resolved via soft timeout, update with final complete result

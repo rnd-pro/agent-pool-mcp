@@ -15,8 +15,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 
-import { runGeminiStreaming, listGeminiSessions, DEFAULT_TIMEOUT_SEC, DEFAULT_APPROVAL_MODE } from './runner/gemini-runner.js';
+import { runGeminiStreaming, listGeminiSessions } from './runner/gemini-runner.js';
 import { runOpencodeStreaming } from './runner/opencode-runner.js';
+import { loadConfig } from './runner/config.js';
+import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, cancelTask, setNotifyCallback } from './tools/results.js';
 import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
@@ -134,18 +136,21 @@ const GEMINI_TOOLS = new Set([
 // ─── Depth tracking (for nested orchestration) ──────────────
 
 const CURRENT_DEPTH = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
-const MAX_DEPTH = process.env.AGENT_POOL_MAX_DEPTH
-  ? parseInt(process.env.AGENT_POOL_MAX_DEPTH)
-  : null; // null = no limit (disabled by default)
 
 function isDepthExceeded() {
-  return MAX_DEPTH !== null && CURRENT_DEPTH >= MAX_DEPTH;
+  const config = loadConfig();
+  return CURRENT_DEPTH >= config.limits.maxDepth;
 }
+
+function getMaxDepth() {
+  return loadConfig().limits.maxDepth;
+}
+
 
 const DEPTH_EXCEEDED_ERROR = {
   content: [{
     type: 'text',
-    text: `⚠️ Orchestration depth limit reached (depth=${CURRENT_DEPTH}, max=${MAX_DEPTH}).
+    text: `⚠️ Orchestration depth limit reached (depth=${CURRENT_DEPTH}, max=${getMaxDepth()}).
 
 This agent-pool instance is running inside a nested Gemini CLI worker.
 Delegation is disabled at this depth to prevent runaway process spawning.
@@ -171,8 +176,11 @@ export function createServer() {
     if (m.length > 0) console.error(`[agent-pool] Discovered ${m.length} models for tool schema`);
   }).catch(() => {});
 
+  // Non-blocking history rotation
+  runHistoryCleanup().catch(() => {});
+
   if (CURRENT_DEPTH > 0) {
-    console.error(`[agent-pool] Nested orchestration: depth=${CURRENT_DEPTH}${MAX_DEPTH !== null ? `, max=${MAX_DEPTH}` : ''}`);
+    console.error(`[agent-pool] Nested orchestration: depth=${CURRENT_DEPTH}, max=${getMaxDepth()}`);
   }
 
   const server = new Server(
@@ -323,8 +331,27 @@ export function createServer() {
  * @returns {{content: Array<{type: string, text: string}>}}
  */
 function handleDelegate(args, { approvalMode, emoji, label }) {
+  const config = loadConfig();
   const taskId = randomUUID();
   const cwd = args.cwd ?? defaultCwd;
+
+  // CWD safety — reject nonsensical workspaces
+  if (config.safety.badCwdList.some(bad => cwd === bad || cwd.startsWith(bad + '/'))) {
+    return {
+      content: [{ type: 'text', text: `❌ Refusing to delegate: cwd="${cwd}" looks like a system directory, not a project workspace. Please provide an explicit cwd pointing to your project.` }],
+      isError: true,
+    };
+  }
+
+  // Concurrency limit
+  const active = getActiveTasks();
+  if (active.length >= config.limits.maxConcurrent) {
+    return {
+      content: [{ type: 'text', text: `⚠️ Concurrency limit reached (${active.length}/${config.limits.maxConcurrent} active tasks). Wait for existing tasks to complete or cancel them first.` }],
+      isError: true,
+    };
+  }
+
   let prompt = args.prompt;
 
   // Hybrid skill activation: provision to project, then instruct native activation
@@ -376,7 +403,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     cwd,
     model: args.model,
     approvalMode: resolvedMode,
-    timeout: args.timeout ?? DEFAULT_TIMEOUT_SEC,
+    timeout: args.timeout ?? config.limits.timeout,
     sessionId: args.session_id,
     taskId,
     runner: args.runner,
@@ -413,7 +440,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
 
 function handleDelegateTask(args) {
   return handleDelegate(args, {
-    approvalMode: DEFAULT_APPROVAL_MODE,
+    approvalMode: loadConfig().safety.defaultApprovalMode,
     emoji: '🚀',
     label: 'Task delegated.',
   });
@@ -421,7 +448,7 @@ function handleDelegateTask(args) {
 
 function handleDelegateReadonly(args) {
   return handleDelegate(args, {
-    approvalMode: DEFAULT_APPROVAL_MODE,
+    approvalMode: loadConfig().safety.defaultApprovalMode,
     emoji: '🔍',
     label: 'Analysis task delegated (full access).',
   });
@@ -878,7 +905,7 @@ function handleDelegateToGroup(args) {
     };
 
     const result = handleDelegate(delegateArgs, {
-      approvalMode: DEFAULT_APPROVAL_MODE,
+      approvalMode: loadConfig().safety.defaultApprovalMode,
       emoji: '👥',
       label: `Group task (${args.group} #${i + 1})`,
     });
