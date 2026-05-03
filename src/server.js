@@ -52,7 +52,7 @@ function checkGemini() {
   try {
     execFileSync('which', ['gemini'], { encoding: 'utf-8', timeout: 2000 });
     geminiAvailable = true;
-  } catch {
+  } catch (e) {
     geminiAvailable = false;
   }
   return geminiAvailable;
@@ -63,7 +63,7 @@ function checkOpencode() {
   try {
     execFileSync('which', ['opencode'], { encoding: 'utf-8', timeout: 2000 });
     opencodeAvailable = true;
-  } catch {
+  } catch (e) {
     opencodeAvailable = false;
   }
   return opencodeAvailable;
@@ -92,7 +92,7 @@ function discoverModels() {
           return;
         }
       }
-    } catch {}
+    } catch (e) { /* config may not exist yet — continue to CLI discovery */ }
 
     // 2. Fallback: discover from OpenCode CLI
     if (!checkOpencode()) {

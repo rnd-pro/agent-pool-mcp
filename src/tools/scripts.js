@@ -60,7 +60,7 @@ export function listScripts(cwd) {
     let size = 0;
     try {
       size = Buffer.byteLength(readFileSync(fullPath, 'utf-8'));
-    } catch {}
+    } catch (e) { /* file may be unreadable — show 0 size */ }
 
     const parts = file.split('.');
     const ext = parts.length > 1 ? parts.pop() : '';
