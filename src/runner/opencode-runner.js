@@ -256,8 +256,8 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
               pushTaskEvent(taskId, normalized);
             }
           }
-        } catch {
-          // Skip non-JSON lines (opencode logs go to stderr, but just in case)
+        } catch (err) {
+          console.error(`[opencode-runner] Failed to parse JSON:`, trimmed, err.message);
         }
       }
     });
@@ -276,14 +276,16 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
       if (watchdog) watchdog.stop();
       untrackChild(child.pid);
 
-            if (buffer.trim()) {
+      if (buffer.trim()) {
         try {
           let parsed = JSON.parse(buffer.trim());
           events.push(parsed);
           if (!detectedSessionId && parsed.sessionID) {
             detectedSessionId = parsed.sessionID;
           }
-        } catch { /* ignore */ }
+        } catch (err) {
+          console.error(`[opencode-runner] Failed to parse JSON:`, buffer.trim(), err.message);
+        }
       }
 
       let result = {

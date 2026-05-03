@@ -171,7 +171,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         let trimmed = line.trim();
         if (!trimmed) continue;
 
-                if (isRemote && !remotePid) {
+        if (isRemote && !remotePid) {
           let pid = parseRemotePid(trimmed);
           if (pid) {
             remotePid = pid;
@@ -199,8 +199,9 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
           }
 
           if (taskId) pushTaskEvent(taskId, parsed);
-        } catch {
-                  }
+        } catch (err) {
+          console.error(`[gemini-runner] Failed to parse JSON:`, jsonStr, err.message);
+        }
       }
     });
 
@@ -217,7 +218,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
             if (resolved) {
         if (buffer.trim()) {
-          try { events.push(JSON.parse(buffer.trim())); } catch { /* ignore */ }
+          try { events.push(JSON.parse(buffer.trim())); } catch (err) { console.error(`[gemini-runner] Failed to parse JSON:`, buffer.trim(), err.message); }
         }
         let messages = events.filter((e) => e.type === 'message');
         let toolUses = events.filter((e) => e.type === 'tool_use');
@@ -241,7 +242,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       }
 
             if (buffer.trim()) {
-        try { events.push(JSON.parse(buffer.trim())); } catch { /* ignore */ }
+        try { events.push(JSON.parse(buffer.trim())); } catch (err) { console.error(`[gemini-runner] Failed to parse JSON:`, buffer.trim(), err.message); }
       }
 
       let messages = events.filter((e) => e.type === 'message');
