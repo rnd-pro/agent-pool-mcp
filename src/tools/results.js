@@ -6,8 +6,9 @@
  */
 
 import { killGroup, getSystemLoad } from '../runner/process-manager.js';
+import { getBoardStore } from './board-store.js';
 
-/** @type {Map<string, {status: string, prompt: string, approvalMode: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null}>} */
+/** @type {Map<string, {cwd: string, status: string, prompt: string, approvalMode: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null}>} */
 const taskStore = new Map();
 
 /** Max number of live events to keep per task (ring buffer) */
@@ -96,9 +97,14 @@ const COACHING_HINTS = [
  * @param {string} prompt - Task prompt
  * @param {string} [waitHint] - Custom coaching hint for polling
  * @param {string} [approvalMode] - Approval mode (yolo, auto_edit, plan)
+ * @param {string} [cwd] - Project root
+ * @param {string} [agentSlug] - Agent identifier
+ * @param {string} [parentId] - Parent task/chat ID for board tree
+ * @param {string} [chatId] - Bound chat ID for UI navigation
  */
-export function createTask(taskId, prompt, waitHint, approvalMode) {
+export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process.cwd(), agentSlug = 'unknown', parentId = null, chatId = null) {
   taskStore.set(taskId, {
+    cwd,
     status: 'running',
     prompt,
     approvalMode: approvalMode ?? 'unknown',
@@ -113,6 +119,26 @@ export function createTask(taskId, prompt, waitHint, approvalMode) {
     lastEventAt: null,
     stderr: '',
   });
+  
+  // Clean up description for board display: strip injected prefixes, truncate
+  let boardDesc = prompt || '';
+  // Remove [Agent Mode: ...] and [Workspace Scope ...] injected prefixes
+  let lastDoubleNewline = boardDesc.lastIndexOf('\n\n');
+  if (lastDoubleNewline > 0 && lastDoubleNewline < boardDesc.length - 2) {
+    boardDesc = boardDesc.substring(lastDoubleNewline + 2);
+  }
+  if (boardDesc.length > 120) boardDesc = boardDesc.substring(0, 120) + '…';
+  
+  getBoardStore(cwd).addNode({
+    id: taskId,
+    parentId,
+    chatId,
+    agentSlug,
+    description: boardDesc,
+    status: 'queued',
+    createdAt: new Date().toISOString()
+  });
+
   if (_notifyCallback) _notifyCallback(taskId, 'created', { meta: getTaskMeta(taskId) });
 }
 
@@ -162,6 +188,7 @@ export function setTaskPid(taskId, pid) {
   const entry = taskStore.get(taskId);
   if (entry) {
     entry.pid = pid;
+    getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'running', startedAt: new Date().toISOString() });
     if (_notifyCallback) _notifyCallback(taskId, 'pid', { pid, meta: getTaskMeta(taskId) });
   }
 }
@@ -179,6 +206,11 @@ export function completeTask(taskId, result) {
     entry.result = result;
     entry.completedAt = Date.now();
     entry.pid = null;
+    
+    const cost = result?.stats?.cost;
+    const tokens = result?.stats?.tokens?.total || result?.stats?.total_tokens;
+    getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'done', completedAt: new Date().toISOString(), cost, tokens });
+
     if (_notifyCallback) _notifyCallback(taskId, 'done', { ...result, meta: getTaskMeta(taskId) });
   }
 }
@@ -211,6 +243,9 @@ export function failTask(taskId, errorMessage) {
     entry.error = errorMessage;
     entry.completedAt = Date.now();
     entry.pid = null;
+    
+    getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'error', completedAt: new Date().toISOString() });
+
     if (_notifyCallback) _notifyCallback(taskId, 'error', { error: errorMessage, meta: getTaskMeta(taskId) });
   }
 }
@@ -244,6 +279,9 @@ export function cancelTask(taskId) {
   entry.status = 'cancelled';
   entry.completedAt = Date.now();
   entry.pid = null;
+  
+  getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'cancelled', completedAt: new Date().toISOString() });
+
   if (_notifyCallback) _notifyCallback(taskId, 'cancelled', { meta: getTaskMeta(taskId) });
 
   return {

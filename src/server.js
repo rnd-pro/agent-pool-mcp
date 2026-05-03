@@ -28,6 +28,7 @@ import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun
 import { createGroup, listGroups, getGroup } from './tools/groups.js';
 import { sendMessage, getMessages } from './tools/messaging.js';
 import { saveScript, listScripts } from './tools/scripts.js';
+import { getBoardStore } from './tools/board-store.js';
 import { trackFiles, untrackFiles } from '../../context-x-mcp/src/file-tracker.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
@@ -253,6 +254,8 @@ export function createServer() {
           response = cancelTask(args.task_id); break;
         case 'list_tasks':
           response = { content: [{ type: 'text', text: JSON.stringify(listAllTasks(), null, 2) }] }; break;
+        case 'get_board_state':
+          response = { content: [{ type: 'text', text: JSON.stringify(getBoardStore(args.cwd || defaultCwd).getSnapshot(), null, 2) }] }; break;
         case 'consult_peer':
           response = consultPeer(args, defaultCwd); break;
         case 'list_sessions':
@@ -422,7 +425,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     skill: args.skill,
   };
 
-  createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode);
+  createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd, args.agent_slug, args.parent_chat_id, args.chat_id);
 
   // Route to the correct runner based on provider
   const provider = args.provider || 'gemini';

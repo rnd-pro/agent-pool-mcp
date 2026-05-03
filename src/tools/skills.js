@@ -13,6 +13,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { parseFrontmatter } from './markdown-parser.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -51,29 +52,6 @@ function getProjectSkillsDir(cwd) {
   return path.join(cwd, '.agents', 'skills');
 }
 
-/**
- * Parse YAML frontmatter from markdown content.
- *
- * @param {string} content - Markdown file content
- * @returns {{name: string, description: string, body: string}}
- */
-function parseFrontmatter(content) {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-  if (!match) return { name: '', description: '', body: content };
-
-  const frontmatter = match[1];
-  const body = match[2].trim();
-  const result = { name: '', description: '', body };
-
-  for (const line of frontmatter.split('\n')) {
-    const [key, ...valueParts] = line.split(':');
-    const value = valueParts.join(':').trim();
-    if (key.trim() === 'name') result.name = value;
-    if (key.trim() === 'description') result.description = value;
-  }
-
-  return result;
-}
 
 /**
  * Read skills from a directory.
@@ -89,11 +67,11 @@ function readSkillsFromDir(dir, tier) {
   return files.map((fileName) => {
     const filePath = path.join(dir, fileName);
     const content = fs.readFileSync(filePath, 'utf-8');
-    const { name, description } = parseFrontmatter(content);
+    const { frontmatter } = parseFrontmatter(content);
     return {
       fileName,
-      name: name || fileName.replace('.md', ''),
-      description: description || '(no description)',
+      name: frontmatter.name || fileName.replace('.md', ''),
+      description: frontmatter.description || '(no description)',
       tier,
       filePath,
     };

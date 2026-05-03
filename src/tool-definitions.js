@@ -79,6 +79,8 @@ export function getToolDefinitions(ctx = {}) {
         policy: { type: 'string', description: 'Policy file for tool restrictions. Use built-in template name (e.g. "read-only", "safe-edit") or absolute path to .yaml policy file.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results. Guides the calling agent on what to do while waiting.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd. Use this to grant access to other project dirs, config dirs, etc.' },
+        agent_slug: { type: 'string', description: 'The slug of the agent being invoked (for board UI tracking). Optional.' },
+        parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
       },
       required: ['prompt'],
     },
@@ -108,6 +110,9 @@ export function getToolDefinitions(ctx = {}) {
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd.' },
+        agent_slug: { type: 'string', description: 'The slug of the agent being invoked (for board UI tracking). Optional.' },
+        parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
+        chat_id: { type: 'string', description: 'The chat ID created for this task via create_chat. Optional.' },
       },
       required: ['prompt'],
     },
@@ -548,6 +553,16 @@ export function getToolDefinitions(ctx = {}) {
       },
     },
   },
+  {
+    name: 'get_board_state',
+    description: 'Get the current state of the Agent Board (tasks and delegation tree).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+    },
+  }
 ];
 }
 
