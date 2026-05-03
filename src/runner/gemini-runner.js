@@ -118,7 +118,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     const events = [];
     let stderrData = '';
     let buffer = '';
-    let timeoutHandle;
+    let watchdog = null;
     let hardTimeoutHandle;
     let remotePid = null;
     let resolved = false;
@@ -126,35 +126,45 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     let stepCount = 0;
 
     if (timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        // Soft timeout: resolve with partial data
-        clearTimeout(timeoutHandle);
-        timeoutHandle = null;
-        resolved = true;
+      watchdog = {
+        timer: null,
+        kick() {
+          if (this.timer) clearTimeout(this.timer);
+          this.timer = setTimeout(() => {
+            // Soft timeout: resolve with partial data
+            this.timer = null;
+            resolved = true;
 
-        const messages = events.filter((e) => e.type === 'message');
-        const toolUses = events.filter((e) => e.type === 'tool_use');
-        const responseText = messages
-          .filter((m) => m.role === 'assistant')
-          .map((m) => m.content ?? m.text ?? '')
-          .join('\n');
+            const messages = events.filter((e) => e.type === 'message');
+            const toolUses = events.filter((e) => e.type === 'tool_use');
+            const responseText = messages
+              .filter((m) => m.role === 'assistant')
+              .map((m) => m.content ?? m.text ?? '')
+              .join('\n');
 
-        resolve({
-          sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
-          response: responseText || '[WAIT] Agent is still working (soft timeout reached). Partial results returned.',
-          stats: null,
-          toolCalls: toolUses.map((t) => ({
-            name: t.tool_name ?? t.name ?? 'unknown',
-            args: t.parameters ?? t.arguments,
-          })),
-          toolResults: [],
-          errors: [],
-          exitCode: null,
-          totalEvents: events.length,
-          softTimeout: true,
-          timeoutSeconds: effectiveTimeout,
-        });
-      }, timeoutMs);
+            resolve({
+              sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
+              response: responseText || '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
+              stats: null,
+              toolCalls: toolUses.map((t) => ({
+                name: t.tool_name ?? t.name ?? 'unknown',
+                args: t.parameters ?? t.arguments,
+              })),
+              toolResults: [],
+              errors: [],
+              exitCode: null,
+              totalEvents: events.length,
+              softTimeout: true,
+              timeoutSeconds: effectiveTimeout,
+            });
+          }, timeoutMs);
+        },
+        stop() {
+          if (this.timer) clearTimeout(this.timer);
+          this.timer = null;
+        }
+      };
+      watchdog.kick();
 
       // Hard timeout safety net — kill process group to prevent infinite zombies
       const hardTimeoutMs = Math.min(
@@ -172,7 +182,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (watchdog) watchdog.stop();
       if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       
       const errMsg = `Failed to start agent process: ${err.message}`;
@@ -192,6 +202,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     });
 
     child.stdout.on('data', (chunk) => {
+      if (watchdog) watchdog.kick();
       if (!hasReceivedData && taskId) {
         hasReceivedData = true;
         pushTaskEvent(taskId, {
@@ -246,13 +257,14 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     });
 
     child.stderr.on('data', (chunk) => {
+      if (watchdog) watchdog.kick();
       const msg = chunk.toString();
       stderrData += msg;
       if (taskId) pushTaskStderr(taskId, msg);
     });
 
     child.on('close', (code) => {
-      clearTimeout(timeoutHandle);
+      if (watchdog) watchdog.stop();
       if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       untrackChild(child.pid);
 

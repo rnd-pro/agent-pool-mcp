@@ -200,7 +200,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     const events = [];
     let stderrData = '';
     let buffer = '';
-    let timeoutHandle;
+    let watchdog = null;
     let hardTimeoutHandle;
     let resolved = false;
     let detectedSessionId = null;
@@ -208,26 +208,34 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     let stepCount = 0;
 
     if (timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        clearTimeout(timeoutHandle);
-        timeoutHandle = null;
-        resolved = true;
-
-        const responseText = extractResponseText(events);
-
-        resolve({
-          sessionId: detectedSessionId,
-          response: responseText || '[WAIT] Agent is still working (soft timeout reached). Partial results returned.',
-          stats: extractStats(events),
-          toolCalls: extractToolCalls(events),
-          toolResults: extractToolResults(events),
-          errors: [],
-          exitCode: null,
-          totalEvents: events.length,
-          softTimeout: true,
-          timeoutSeconds: effectiveTimeout,
-        });
-      }, timeoutMs);
+      watchdog = {
+        timer: null,
+        kick() {
+          if (this.timer) clearTimeout(this.timer);
+          this.timer = setTimeout(() => {
+            this.timer = null;
+            resolved = true;
+            const responseText = extractResponseText(events);
+            resolve({
+              sessionId: detectedSessionId,
+              response: responseText || '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
+              stats: extractStats(events),
+              toolCalls: extractToolCalls(events),
+              toolResults: extractToolResults(events),
+              errors: [],
+              exitCode: null,
+              totalEvents: events.length,
+              softTimeout: true,
+              timeoutSeconds: effectiveTimeout,
+            });
+          }, timeoutMs);
+        },
+        stop() {
+          if (this.timer) clearTimeout(this.timer);
+          this.timer = null;
+        }
+      };
+      watchdog.kick();
 
       // Hard timeout safety net — kill process group to prevent infinite zombies
       const hardTimeoutMs = Math.min(
@@ -245,7 +253,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (watchdog) watchdog.stop();
       if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
 
       const errMsg = `Failed to start opencode process: ${err.message}`;
@@ -265,6 +273,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     });
 
     child.stdout.on('data', (chunk) => {
+      if (watchdog) watchdog.kick();
       if (!hasReceivedData && taskId) {
         hasReceivedData = true;
         pushTaskEvent(taskId, {
@@ -313,6 +322,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     });
 
     child.stderr.on('data', (chunk) => {
+      if (watchdog) watchdog.kick();
       const text = chunk.toString();
       // Filter out opencode INFO lines — they're noisy and not errors
       if (!text.startsWith('INFO ')) {
@@ -322,7 +332,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     });
 
     child.on('close', (code) => {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (watchdog) watchdog.stop();
       if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       untrackChild(child.pid);
 
