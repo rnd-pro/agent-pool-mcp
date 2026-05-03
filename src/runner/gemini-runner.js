@@ -36,18 +36,18 @@ export { DEFAULT_APPROVAL_MODE };
  */
 export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy, includeDirs }) {
   return new Promise((resolve, reject) => {
-    const runner = getRunner(runnerId);
-    const isRemote = runner.type === 'ssh';
-    const args = [];
+    let runner = getRunner(runnerId);
+    let isRemote = runner.type === 'ssh';
+    let args = [];
 
     if (sessionId) {
       args.push('--resume', sessionId);
     }
     let finalPrompt = prompt;
     try {
-      const teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
+      let teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
       if (existsSync(teamRulesPath)) {
-        const rules = readFileSync(teamRulesPath, 'utf8').trim();
+        let rules = readFileSync(teamRulesPath, 'utf8').trim();
         if (rules) {
           finalPrompt = `[GLOBAL TEAM CONTEXT AND RULES]\n${rules}\n[/GLOBAL TEAM CONTEXT AND RULES]\n\nTask:\n${prompt}`;
         }
@@ -61,7 +61,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       '--output-format', 'stream-json',
       '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
     );
-    const effectiveModel = model || loadConfig().defaultModel;
+    let effectiveModel = model || loadConfig().defaultModel;
     if (effectiveModel) {
       args.push('--model', effectiveModel);
     }
@@ -69,26 +69,26 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       args.push('--policy', policy);
     }
     if (includeDirs?.length > 0) {
-      for (const dir of includeDirs) {
+      for (let dir of includeDirs) {
         args.push('--include-directories', dir);
       }
     }
 
-    const config = loadConfig();
-    const effectiveTimeout = timeout ?? config.limits.timeout;
-    const timeoutMs = effectiveTimeout * 1000;
+    let config = loadConfig();
+    let effectiveTimeout = timeout ?? config.limits.timeout;
+    let timeoutMs = effectiveTimeout * 1000;
 
     let spawnCmd, spawnArgs, spawnOpts;
 
     if (isRemote) {
-      const ssh = buildSshSpawn(runner, args, cwd ?? process.cwd());
+      let ssh = buildSshSpawn(runner, args, cwd ?? process.cwd());
       spawnCmd = ssh.command;
       spawnArgs = ssh.args;
       spawnOpts = { stdio: ['pipe', 'pipe', 'pipe'], detached: true };
     } else {
       spawnCmd = 'gemini';
       spawnArgs = args;
-      const currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
+      let currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
       spawnOpts = {
         cwd: cwd ?? process.cwd(),
         env: {
@@ -102,7 +102,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       };
     }
 
-    const child = spawn(spawnCmd, spawnArgs, spawnOpts);
+    let child = spawn(spawnCmd, spawnArgs, spawnOpts);
 
     if (taskId) {
       pushTaskEvent(taskId, {
@@ -115,7 +115,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     trackChild(child.pid, taskId ?? 'streaming', `gemini-${isRemote ? 'ssh' : 'local'}`);
     if (taskId) setTaskPid(taskId, child.pid);
 
-    const events = [];
+    let events = [];
     let stderrData = '';
     let buffer = '';
     let watchdog = null;
@@ -135,16 +135,17 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
             this.timer = null;
             resolved = true;
 
-            const messages = events.filter((e) => e.type === 'message');
-            const toolUses = events.filter((e) => e.type === 'tool_use');
-            const responseText = messages
+            let messages = events.filter((e) => e.type === 'message');
+            let toolUses = events.filter((e) => e.type === 'tool_use');
+            let responseText = messages
               .filter((m) => m.role === 'assistant')
               .map((m) => m.content ?? m.text ?? '')
               .join('\n');
 
             resolve({
               sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
-              response: responseText || '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
+              response: responseText || 
+                '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
               stats: null,
               toolCalls: toolUses.map((t) => ({
                 name: t.tool_name ?? t.name ?? 'unknown',
@@ -167,7 +168,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       watchdog.kick();
 
       // Hard timeout safety net — kill process group to prevent infinite zombies
-      const hardTimeoutMs = Math.min(
+      let hardTimeoutMs = Math.min(
         timeoutMs * config.limits.hardTimeoutMultiplier,
         config.limits.hardTimeoutMax * 1000,
       );
@@ -185,7 +186,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       if (watchdog) watchdog.stop();
       if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       
-      const errMsg = `Failed to start agent process: ${err.message}`;
+      let errMsg = `Failed to start agent process: ${err.message}`;
       if (taskId) pushTaskStderr(taskId, errMsg);
       
       resolve({
@@ -213,16 +214,16 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       }
       let text = chunk.toString();
       buffer += text;
-      const lines = buffer.split('\n');
+      let lines = buffer.split('\n');
       buffer = lines.pop();
 
-      for (const line of lines) {
-        const trimmed = line.trim();
+      for (let line of lines) {
+        let trimmed = line.trim();
         if (!trimmed) continue;
 
         // Parse remote PID from SSH wrapper
         if (isRemote && !remotePid) {
-          const pid = parseRemotePid(trimmed);
+          let pid = parseRemotePid(trimmed);
           if (pid) {
             remotePid = pid;
             continue; // Don't parse PID line as JSON
@@ -230,14 +231,14 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         }
 
         let jsonStr = trimmed;
-        const braceIdx = jsonStr.indexOf('{');
+        let braceIdx = jsonStr.indexOf('{');
         if (braceIdx > 0) {
           jsonStr = jsonStr.substring(braceIdx);
         }
         if (!jsonStr.startsWith('{')) continue;
 
         try {
-          const parsed = JSON.parse(jsonStr);
+          let parsed = JSON.parse(jsonStr);
           events.push(parsed);
 
           // Max steps safety — kill runaway agents
@@ -258,7 +259,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     child.stderr.on('data', (chunk) => {
       if (watchdog) watchdog.kick();
-      const msg = chunk.toString();
+      let msg = chunk.toString();
       stderrData += msg;
       if (taskId) pushTaskStderr(taskId, msg);
     });
@@ -273,12 +274,12 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         if (buffer.trim()) {
           try { events.push(JSON.parse(buffer.trim())); } catch { /* ignore */ }
         }
-        const messages = events.filter((e) => e.type === 'message');
-        const toolUses = events.filter((e) => e.type === 'tool_use');
-        const toolResults = events.filter((e) => e.type === 'tool_result');
-        const resultEvent = events.find((e) => e.type === 'result');
-        const errors = events.filter((e) => e.type === 'error');
-        const responseText = messages.filter((m) => m.role === 'assistant').map((m) => m.content ?? m.text ?? '').join('\n');
+        let messages = events.filter((e) => e.type === 'message');
+        let toolUses = events.filter((e) => e.type === 'tool_use');
+        let toolResults = events.filter((e) => e.type === 'tool_result');
+        let resultEvent = events.find((e) => e.type === 'result');
+        let errors = events.filter((e) => e.type === 'error');
+        let responseText = messages.filter((m) => m.role === 'assistant').map((m) => m.content ?? m.text ?? '').join('\n');
         if (taskId) {
           updateTaskResult(taskId, {
             sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
@@ -299,18 +300,18 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         try { events.push(JSON.parse(buffer.trim())); } catch { /* ignore */ }
       }
 
-      const messages = events.filter((e) => e.type === 'message');
-      const toolUses = events.filter((e) => e.type === 'tool_use');
-      const toolResults = events.filter((e) => e.type === 'tool_result');
-      const resultEvent = events.find((e) => e.type === 'result');
-      const errors = events.filter((e) => e.type === 'error');
+      let messages = events.filter((e) => e.type === 'message');
+      let toolUses = events.filter((e) => e.type === 'tool_use');
+      let toolResults = events.filter((e) => e.type === 'tool_result');
+      let resultEvent = events.find((e) => e.type === 'result');
+      let errors = events.filter((e) => e.type === 'error');
 
-      const responseText = messages
+      let responseText = messages
         .filter((m) => m.role === 'assistant')
         .map((m) => m.content ?? m.text ?? '')
         .join('\n');
 
-      const initEvent = events.find((e) => e.type === 'init');
+      let initEvent = events.find((e) => e.type === 'init');
 
       resolve({
         sessionId: initEvent?.session_id ?? initEvent?.sessionId ?? null,
@@ -357,9 +358,9 @@ export function listGeminiSessions(cwd) {
       env: { ...process.env, TERM: 'dumb', CI: '1' },
     }, (error, stdout) => {
       if (error) return resolve([]);
-      const sessions = [];
-      for (const line of stdout.split('\n')) {
-        const match = line.match(/^\s*(\d+)\.\s+(.+?)\s+\((.+?)\)\s+\[([a-f0-9-]+)\]/);
+      let sessions = [];
+      for (let line of stdout.split('\n')) {
+        let match = line.match(/^\s*(\d+)\.\s+(.+?)\s+\((.+?)\)\s+\[([a-f0-9-]+)\]/);
         if (match) {
           sessions.push({
             index: parseInt(match[1]),

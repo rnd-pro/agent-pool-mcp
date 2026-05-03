@@ -83,8 +83,8 @@ function normalizeEvent(ev) {
  */
 export async function runOpencodeStreaming(options) {
   let attempt = 0;
-  const fallbacks = options.groupConfig?.fallback_profiles || [];
-  const rotationMode = options.groupConfig?.rotation_mode || 'error_fallback';
+  let fallbacks = options.groupConfig?.fallback_profiles || [];
+  let rotationMode = options.groupConfig?.rotation_mode || 'error_fallback';
   
   let currentModel = options.model;
   if (!currentModel) {
@@ -96,7 +96,7 @@ export async function runOpencodeStreaming(options) {
   }
 
   while (true) {
-    const runOpts = { ...options, model: currentModel };
+    let runOpts = { ...options, model: currentModel };
     
     if (attempt > 0 && options.taskId) {
       pushTaskEvent(options.taskId, {
@@ -107,11 +107,11 @@ export async function runOpencodeStreaming(options) {
       console.error(`[opencode-runner] Fallback: Retrying with ${currentModel}`);
     }
 
-    const result = await runOpencodeStreamingInternal(runOpts);
+    let result = await runOpencodeStreamingInternal(runOpts);
 
     // Check if it failed
-    const hasError = result.exitCode !== 0 && result.exitCode !== null;
-    const hasStreamError = result.errors && result.errors.length > 0;
+    let hasError = result.exitCode !== 0 && result.exitCode !== null;
+    let hasStreamError = result.errors && result.errors.length > 0;
     
     if (rotationMode === 'error_fallback' && (hasError || hasStreamError)) {
       // Find index of current model in fallbacks
@@ -135,7 +135,7 @@ export async function runOpencodeStreaming(options) {
 
 async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessionId, taskId, skill, groupConfig }) {
   return new Promise((resolve, reject) => {
-    const args = ['run', '--format', 'json'];
+    let args = ['run', '--format', 'json'];
 
     if (model) {
       args.push('-m', model);
@@ -146,19 +146,19 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     }
 
     // Force OpenCode to use our title instead of generating one using its default Haiku fast-model
-    const titleParts = [];
+    let titleParts = [];
     if (groupConfig?.name) titleParts.push(`[Group:${groupConfig.name}]`);
     if (skill) titleParts.push(`[Skill:${skill}]`);
     
     // We append a generic "Agent Task" if nothing else, or mix them.
-    const titleString = titleParts.length > 0 ? `${titleParts.join(' ')} Agent Task` : 'Agent Task';
+    let titleString = titleParts.length > 0 ? `${titleParts.join(' ')} Agent Task` : 'Agent Task';
     args.push('--title', titleString);
 
     let finalPrompt = prompt;
     try {
-      const teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
+      let teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
       if (existsSync(teamRulesPath)) {
-        const rules = readFileSync(teamRulesPath, 'utf8').trim();
+        let rules = readFileSync(teamRulesPath, 'utf8').trim();
         if (rules) {
           finalPrompt = `[GLOBAL TEAM CONTEXT AND RULES]\n${rules}\n[/GLOBAL TEAM CONTEXT AND RULES]\n\nTask:\n${prompt}`;
         }
@@ -169,11 +169,11 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
 
     args.push(finalPrompt);
 
-    const config = loadConfig();
-    const effectiveTimeout = timeout ?? config.limits.timeout;
-    const timeoutMs = effectiveTimeout * 1000;
+    let config = loadConfig();
+    let effectiveTimeout = timeout ?? config.limits.timeout;
+    let timeoutMs = effectiveTimeout * 1000;
 
-    const spawnOpts = {
+    let spawnOpts = {
       cwd: cwd ?? process.cwd(),
       env: {
         ...process.env,
@@ -184,7 +184,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
       detached: true,
     };
 
-    const child = spawn('opencode', args, spawnOpts);
+    let child = spawn('opencode', args, spawnOpts);
 
     if (taskId) {
       pushTaskEvent(taskId, {
@@ -197,7 +197,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     trackChild(child.pid, taskId ?? 'streaming', 'opencode-local');
     if (taskId) setTaskPid(taskId, child.pid);
 
-    const events = [];
+    let events = [];
     let stderrData = '';
     let buffer = '';
     let watchdog = null;
@@ -215,10 +215,11 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
           this.timer = setTimeout(() => {
             this.timer = null;
             resolved = true;
-            const responseText = extractResponseText(events);
+            let responseText = extractResponseText(events);
             resolve({
               sessionId: detectedSessionId,
-              response: responseText || '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
+              response: responseText || 
+                '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
               stats: extractStats(events),
               toolCalls: extractToolCalls(events),
               toolResults: extractToolResults(events),
@@ -238,7 +239,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
       watchdog.kick();
 
       // Hard timeout safety net — kill process group to prevent infinite zombies
-      const hardTimeoutMs = Math.min(
+      let hardTimeoutMs = Math.min(
         timeoutMs * config.limits.hardTimeoutMultiplier,
         config.limits.hardTimeoutMax * 1000,
       );
@@ -256,7 +257,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
       if (watchdog) watchdog.stop();
       if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
 
-      const errMsg = `Failed to start opencode process: ${err.message}`;
+      let errMsg = `Failed to start opencode process: ${err.message}`;
       if (taskId) pushTaskStderr(taskId, errMsg);
 
       resolve({
@@ -283,15 +284,15 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
         });
       }
       buffer += chunk.toString();
-      const lines = buffer.split('\n');
+      let lines = buffer.split('\n');
       buffer = lines.pop();
 
-      for (const line of lines) {
-        const trimmed = line.trim();
+      for (let line of lines) {
+        let trimmed = line.trim();
         if (!trimmed) continue;
 
         try {
-          const parsed = JSON.parse(trimmed);
+          let parsed = JSON.parse(trimmed);
           events.push(parsed);
 
           // Capture session ID from first event
@@ -310,7 +311,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
 
           // Normalize and push to task tracker for live streaming
           if (taskId) {
-            const normalized = normalizeEvent(parsed);
+            let normalized = normalizeEvent(parsed);
             if (normalized) {
               pushTaskEvent(taskId, normalized);
             }
@@ -323,7 +324,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
 
     child.stderr.on('data', (chunk) => {
       if (watchdog) watchdog.kick();
-      const text = chunk.toString();
+      let text = chunk.toString();
       // Filter out opencode INFO lines — they're noisy and not errors
       if (!text.startsWith('INFO ')) {
         stderrData += text;
@@ -339,7 +340,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
       // Process remaining buffer
       if (buffer.trim()) {
         try {
-          const parsed = JSON.parse(buffer.trim());
+          let parsed = JSON.parse(buffer.trim());
           events.push(parsed);
           if (!detectedSessionId && parsed.sessionID) {
             detectedSessionId = parsed.sessionID;
@@ -347,7 +348,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
         } catch { /* ignore */ }
       }
 
-      const result = {
+      let result = {
         sessionId: detectedSessionId,
         response: extractResponseText(events),
         stats: extractStats(events),
@@ -418,9 +419,9 @@ function extractToolResults(events) {
  * @returns {object|null}
  */
 function extractStats(events) {
-  const finishes = events.filter(e => e.type === 'step_finish');
+  let finishes = events.filter(e => e.type === 'step_finish');
   if (finishes.length === 0) return null;
-  const last = finishes[finishes.length - 1];
+  let last = finishes[finishes.length - 1];
   return {
     cost: last.part?.cost ?? 0,
     tokens: last.part?.tokens ?? null,
