@@ -109,17 +109,17 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       let toolUses = events.filter((e) => e.type === 'tool_use');
       let responseText = messages
         .filter((m) => m.role === 'assistant')
-        .map((m) => m.content ?? m.text ?? '')
+        .map((m) => m.text || '')
         .join('\n');
 
       resolve({
-        sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
+        sessionId: events.find((e) => e.type === 'init')?.session_id || null,
         response: responseText || 
           '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
         stats: null,
         toolCalls: toolUses.map((t) => ({
-          name: t.tool_name ?? t.name ?? 'unknown',
-          args: t.parameters ?? t.arguments,
+          name: t.name || 'unknown',
+          args: t.arguments,
         })),
         toolResults: [],
         errors: [],
@@ -225,15 +225,15 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         let toolResults = events.filter((e) => e.type === 'tool_result');
         let resultEvent = events.find((e) => e.type === 'result');
         let errors = events.filter((e) => e.type === 'error');
-        let responseText = messages.filter((m) => m.role === 'assistant').map((m) => m.content ?? m.text ?? '').join('\n');
+        let responseText = messages.filter((m) => m.role === 'assistant').map((m) => m.text || '').join('\n');
         if (taskId) {
           updateTaskResult(taskId, {
-            sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
+            sessionId: events.find((e) => e.type === 'init')?.session_id || null,
             response: resultEvent?.response ?? responseText,
             stats: resultEvent?.stats ?? null,
-            toolCalls: toolUses.map((t) => ({ name: t.tool_name ?? t.name ?? 'unknown', args: t.parameters ?? t.arguments })),
-            toolResults: toolResults.map((t) => ({ name: t.tool_name ?? t.tool_id ?? t.name ?? 'unknown', output: t.output ? (typeof t.output === 'string' ? t.output.substring(0, 500) : JSON.stringify(t.output)?.substring(0, 500)) : t.status ?? '' })),
-            errors: errors.map((e) => e.message ?? e.error ?? JSON.stringify(e)),
+            toolCalls: toolUses.map((t) => ({ name: t.name || 'unknown', args: t.arguments })),
+            toolResults: toolResults.map((t) => ({ name: t.name || 'unknown', output: t.output ? (typeof t.output === 'string' ? t.output.substring(0, 500) : JSON.stringify(t.output)?.substring(0, 500)) : t.status ?? '' })),
+            errors: errors.map((e) => e.message || JSON.stringify(e)),
             exitCode: code,
             totalEvents: events.length,
           });
@@ -253,26 +253,26 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
       let responseText = messages
         .filter((m) => m.role === 'assistant')
-        .map((m) => m.content ?? m.text ?? '')
+        .map((m) => m.text || '')
         .join('\n');
 
       let initEvent = events.find((e) => e.type === 'init');
 
       resolve({
-        sessionId: initEvent?.session_id ?? initEvent?.sessionId ?? null,
+        sessionId: initEvent?.session_id || null,
         response: resultEvent?.response ?? responseText,
         stats: resultEvent?.stats ?? null,
         toolCalls: toolUses.map((t) => ({
-          name: t.tool_name ?? t.name ?? 'unknown',
-          args: t.parameters ?? t.arguments,
+          name: t.name || 'unknown',
+          args: t.arguments,
         })),
         toolResults: toolResults.map((t) => ({
-          name: t.tool_name ?? t.tool_id ?? t.name ?? 'unknown',
+          name: t.name || 'unknown',
           output: t.output
             ? (typeof t.output === 'string' ? t.output.substring(0, 500) : JSON.stringify(t.output)?.substring(0, 500))
             : t.status ?? '',
         })),
-        errors: errors.map((e) => e.message ?? e.error ?? JSON.stringify(e)),
+        errors: errors.map((e) => e.message || JSON.stringify(e)),
         exitCode: code,
         totalEvents: events.length,
       });

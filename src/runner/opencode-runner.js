@@ -21,23 +21,22 @@ function normalizeEvent(ev) {
     case 'tool_call':
       return {
         type: 'tool_use',
-        name: ev.part?.name ?? ev.part?.toolName ?? 'unknown',
-        tool_name: ev.part?.name ?? ev.part?.toolName ?? 'unknown',
-        parameters: ev.part?.input ?? ev.part?.parameters ?? {},
+        name: ev.part?.name || 'unknown',
+        parameters: ev.part?.parameters || {},
       };
 
     case 'tool_result':
       return {
         type: 'tool_result',
-        output: ev.part?.output ?? ev.part?.result ?? '',
+        output: ev.part?.result || '',
         status: ev.part?.status ?? 'success',
       };
 
     case 'error':
       return {
         type: 'error',
-        message: ev.error?.data?.message ?? ev.error?.message ?? JSON.stringify(ev.error),
-        error: ev.error?.data?.message ?? ev.error?.message ?? JSON.stringify(ev.error),
+        message: ev.error?.message || JSON.stringify(ev.error),
+        error: ev.error?.message || JSON.stringify(ev.error),
       };
 
     case 'step_start':
@@ -334,8 +333,8 @@ function extractToolCalls(events) {
   return events
     .filter(e => e.type === 'tool_call')
     .map(e => ({
-      name: e.part?.name ?? e.part?.toolName ?? 'unknown',
-      args: e.part?.input ?? e.part?.parameters ?? {},
+      name: e.part?.name || 'unknown',
+      args: e.part?.parameters || {},
     }));
 }
 
@@ -348,8 +347,8 @@ function extractToolResults(events) {
   return events
     .filter(e => e.type === 'tool_result')
     .map(e => ({
-      name: e.part?.name ?? e.part?.toolName ?? 'unknown',
-      output: (e.part?.output ?? e.part?.result ?? '').toString().substring(0, 500),
+      name: e.part?.name || 'unknown',
+      output: (e.part?.result || '').toString().substring(0, 500),
     }));
 }
 
@@ -376,5 +375,5 @@ function extractStats(events) {
 function extractErrors(events) {
   return events
     .filter(e => e.type === 'error')
-    .map(e => e.error?.data?.message ?? e.error?.message ?? JSON.stringify(e.error));
+    .map(e => e.error?.message || JSON.stringify(e.error));
 }
