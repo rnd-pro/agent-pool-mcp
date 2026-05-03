@@ -553,8 +553,11 @@ export function formatTaskResult(taskId) {
     const models = Object.keys(s.models ?? {});
     if (models.length > 0) statParts.push(`- Models: ${models.join(', ')}`);
     if (s.total_tokens) statParts.push(`- Tokens: ${s.total_tokens} total`);
-    if (s.tokens) statParts.push(`- Tokens: ${s.tokens} total`);
-    if (s.cost !== undefined && s.cost > 0) statParts.push(`- Cost: $${Number(s.cost).toFixed(4)}`);
+    if (s.tokens) {
+      const tks = typeof s.tokens === 'object' ? s.tokens.total : s.tokens;
+      statParts.push(`- Tokens: ${tks} total`);
+    }
+    if (s.cost !== undefined && s.cost !== null) statParts.push(`- Cost: $${Number(s.cost).toFixed(4)}`);
     if (s.duration_ms) statParts.push(`- Duration: ${(s.duration_ms / 1000).toFixed(1)}s`);
   }
   if (result.exitCode !== null && result.exitCode !== undefined) {
