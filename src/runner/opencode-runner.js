@@ -1,14 +1,3 @@
-/**
- * OpenCode CLI runner — spawns OpenCode CLI processes with JSON output.
- *
- * Uses process-manager for PID tracking and group kill on timeout.
- * OpenCode JSON format differs from Gemini:
- *   - step_start / text / tool_call / tool_result / step_finish
- *   - Session ID in every event's `sessionID` field
- *   - Model specified as `-m provider/model`
- *
- * @module agent-pool/runner/opencode-runner
- */
 
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -20,13 +9,6 @@ import { loadConfig } from './config.js';
 import { getGroupNextModel } from '../tools/groups.js';
 import { createProcessWatchdog } from './timeout-manager.js';
 
-/**
- * Normalize an OpenCode JSON event into the unified format
- * that the portal UI understands (same shape as Gemini events).
- *
- * @param {object} ev - raw OpenCode event
- * @returns {object|null} normalized event or null to skip
- */
 function normalizeEvent(ev) {
   switch (ev.type) {
     case 'text':
@@ -68,20 +50,6 @@ function normalizeEvent(ev) {
   }
 }
 
-/**
- * Run OpenCode CLI with JSON format and collect events.
- * Spawns with detached=true for proper group kill on timeout.
- *
- * @param {object} options
- * @param {string} options.prompt - Task prompt
- * @param {string} [options.cwd] - Working directory
- * @param {string} [options.model] - Model ID (e.g. "opencode/gpt-5-nano")
- * @param {number} [options.timeout] - Timeout in seconds
- * @param {string} [options.sessionId] - Session to resume
- * @param {string} [options.taskId] - Task ID for tracking
- * @param {object} [options.groupConfig] - Optional group config defining fallback_profiles
- * @returns {Promise<object>} Collected events and final response
- */
 export async function runOpencodeStreaming(options) {
   let attempt = 0;
   let fallbacks = options.groupConfig?.fallback_profiles || [];
@@ -165,8 +133,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
         }
       }
     } catch (e) {
-      // Ignore read errors
-    }
+          }
 
     args.push(finalPrompt);
 
@@ -309,8 +276,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
       if (watchdog) watchdog.stop();
       untrackChild(child.pid);
 
-      // Process remaining buffer
-      if (buffer.trim()) {
+            if (buffer.trim()) {
         try {
           let parsed = JSON.parse(buffer.trim());
           events.push(parsed);

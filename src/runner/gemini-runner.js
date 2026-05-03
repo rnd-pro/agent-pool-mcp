@@ -1,10 +1,3 @@
-/**
- * Gemini CLI runner — spawns Gemini CLI processes with streaming JSON output.
- *
- * Uses process-manager for PID tracking and group kill on timeout.
- *
- * @module agent-pool/runner/gemini-runner
- */
 
 import { spawn, execFile } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -21,20 +14,6 @@ const DEFAULT_APPROVAL_MODE = 'yolo';
 export { DEFAULT_APPROVAL_MODE };
 
 
-/**
- * Run Gemini CLI with stream-json format and collect events.
- * Spawns with detached=true for proper group kill on timeout.
- *
- * @param {object} options
- * @param {string} options.prompt - Task prompt
- * @param {string} [options.cwd] - Working directory
- * @param {string} [options.model] - Model ID
- * @param {string} [options.approvalMode] - Approval mode
- * @param {number} [options.timeout] - Timeout in seconds
- * @param {string} [options.sessionId] - Session to resume
- * @param {string} [options.taskId] - Task ID for tracking
- * @returns {Promise<object>} Collected events and final response
- */
 export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy, includeDirs }) {
   return new Promise((resolve, reject) => {
     let runner = getRunner(runnerId);
@@ -54,8 +33,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         }
       }
     } catch (e) {
-      // Ignore read errors
-    }
+          }
 
     args.push('-p', finalPrompt);
     args.push(
@@ -193,12 +171,11 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         let trimmed = line.trim();
         if (!trimmed) continue;
 
-        // Parse remote PID from SSH wrapper
-        if (isRemote && !remotePid) {
+                if (isRemote && !remotePid) {
           let pid = parseRemotePid(trimmed);
           if (pid) {
             remotePid = pid;
-            continue; // Don't parse PID line as JSON
+            continue;
           }
         }
 
@@ -213,8 +190,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
           let parsed = JSON.parse(jsonStr);
           events.push(parsed);
 
-          // Max steps safety — kill runaway agents
-          if (parsed.type === 'result' || (parsed.type === 'message' && parsed.role === 'assistant')) {
+                    if (parsed.type === 'result' || (parsed.type === 'message' && parsed.role === 'assistant')) {
             stepCount++;
             if (stepCount >= config.limits.maxSteps && child.exitCode === null) {
               console.error(`[gemini-runner] MAX STEPS (${config.limits.maxSteps}) reached — killing PID ${child.pid}`);
@@ -224,8 +200,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
           if (taskId) pushTaskEvent(taskId, parsed);
         } catch {
-          // Skip non-JSON lines
-        }
+                  }
       }
     });
 
@@ -240,8 +215,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       if (watchdog) watchdog.stop();
       untrackChild(child.pid);
 
-      // If already resolved via soft timeout, update with final complete result
-      if (resolved) {
+            if (resolved) {
         if (buffer.trim()) {
           try { events.push(JSON.parse(buffer.trim())); } catch { /* ignore */ }
         }
@@ -266,8 +240,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         return;
       }
 
-      // Process remaining buffer
-      if (buffer.trim()) {
+            if (buffer.trim()) {
         try { events.push(JSON.parse(buffer.trim())); } catch { /* ignore */ }
       }
 

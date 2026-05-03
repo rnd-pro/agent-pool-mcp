@@ -1,8 +1,6 @@
 import { killGroup } from './process-manager.js';
 
 /**
- * Creates a dynamic watchdog timer that manages both soft inactivity timeouts and hard max timeouts.
- *
  * @param {number} timeoutMs 
  * @param {function} onSoftTimeout 
  * @param {object} config 
@@ -35,11 +33,9 @@ export function createProcessWatchdog(timeoutMs, onSoftTimeout, config, child) {
     }
   };
 
-  // Start the soft inactivity timer
-  watchdog.kick();
+    watchdog.kick();
 
-  // Hard timeout safety net — kill process group to prevent infinite zombies
-  let hardTimeoutMs = Math.min(
+    let hardTimeoutMs = Math.min(
     timeoutMs * config.limits.hardTimeoutMultiplier,
     config.limits.hardTimeoutMax * 1000
   );
