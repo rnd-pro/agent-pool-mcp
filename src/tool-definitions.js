@@ -177,7 +177,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'list_skills',
-    description: 'List available Gemini CLI skills from all tiers: project (.gemini/skills/), user-global (~/.gemini/skills/), and built-in (shipped with agent-pool). Shows tier label for each skill.',
+    description: 'List available CLI skills from all tiers: project (.agents/skills/), user-global (~/.agent-portal/skills/), and built-in (shipped with agent-pool). Shows tier label for each skill.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -188,14 +188,14 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'create_skill',
-    description: 'Create or update a Gemini CLI skill. Writes a .md file with YAML frontmatter. Use scope to control where: "project" (default) or "global" (~/.gemini/skills/).',
+    description: 'Create or update a CLI skill. Writes a .md file with YAML frontmatter. Use scope to control where: "project" (default) or "global" (~/.agent-portal/skills/).',
     inputSchema: {
       type: 'object',
       properties: {
         skill_name: { type: 'string', description: 'Skill name (used as filename, e.g. "code-reviewer").' },
         description: { type: 'string', description: 'Short description of what the skill does.' },
         instructions: { type: 'string', description: 'Full markdown instructions for the skill. Define the agent role, rules, and output format.' },
-        scope: { type: 'string', enum: ['project', 'global'], description: 'Where to save: "project" (default, .gemini/skills/) or "global" (~/.gemini/skills/).' },
+        scope: { type: 'string', enum: ['project', 'global'], description: 'Where to save: "project" (default, .agents/skills/) or "global" (~/.agent-portal/skills/).' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
@@ -499,6 +499,53 @@ export function getToolDefinitions(ctx = {}) {
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
       },
       required: ['channel'],
+    },
+  },
+  {
+    name: 'save_script',
+    description: 'Save a local automation script to the project database (.agents/scripts/). This is useful for zero-token execution nodes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the script without extension (e.g. "build-checker").' },
+        code: { type: 'string', description: 'The raw script code.' },
+        ext: { type: 'string', description: 'File extension. Default: "js".' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+      required: ['name', 'code'],
+    },
+  },
+  {
+    name: 'list_scripts',
+    description: 'List all locally saved automation scripts.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+    },
+  },
+  {
+    name: 'track_files',
+    description: 'Track active files in the current project context (.agents/active_context.json). Useful to persist file context between pipeline steps.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        files: { type: 'array', items: { type: 'string' }, description: 'Array of file paths to track.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+      required: ['files'],
+    },
+  },
+  {
+    name: 'untrack_files',
+    description: 'Remove files from the active tracking context.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        files: { type: 'array', items: { type: 'string' }, description: 'Array of file paths to untrack. If empty, clears all.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
     },
   },
 ];

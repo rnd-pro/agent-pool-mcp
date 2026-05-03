@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUILTIN_SKILLS_DIR = path.resolve(__dirname, '..', '..', 'skills');
 
 /** User-global skills directory */
-const USER_GLOBAL_SKILLS_DIR = path.join(os.homedir(), '.gemini', 'skills');
+const USER_GLOBAL_SKILLS_DIR = path.join(os.homedir(), '.agent-portal', 'skills');
 
 /**
  * Sanitize skill name to prevent path traversal.
@@ -48,7 +48,7 @@ function sanitizeSkillName(name) {
  * @returns {string}
  */
 function getProjectSkillsDir(cwd) {
-  return path.join(cwd, '.gemini', 'skills');
+  return path.join(cwd, '.agents', 'skills');
 }
 
 /**

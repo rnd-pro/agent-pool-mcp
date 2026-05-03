@@ -375,7 +375,7 @@ export function formatTaskResult(taskId) {
                 resultInfo += ` ${result.status === 'success' ? '✓' : '✗'} ${output.substring(0, 60)}`;
               }
             } else {
-              resultInfo = ' ⏳ running...';
+              resultInfo = ' [RUN] running...';
             }
           }
           return `  \`${name}\`${shortDetail}${resultInfo}`;
@@ -394,7 +394,7 @@ export function formatTaskResult(taskId) {
         progress = `\n\n**Progress:**\n${parts.join('\n')}`;
       }
     } else if (parseInt(elapsed) > 10) {
-      progress = '\n\n⏳ *Cold start — Gemini CLI initialization takes ~15-20s*';
+      progress = '\n\n[WAIT] *Cold start — Gemini CLI initialization takes ~15-20s*';
     }
 
     // Time since last event — key diagnostic
@@ -468,7 +468,7 @@ export function formatTaskResult(taskId) {
     return {
       content: [{
         type: 'text',
-        text: `⏳ Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}\n- **PID**: ${entry.pid ?? 'unknown'}${pidStatus}${activityInfo}${stderrInfo}${progress}\n\n💡 **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
+        text: `[RUN] Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}\n- **PID**: ${entry.pid ?? 'unknown'}${pidStatus}${activityInfo}${stderrInfo}${progress}\n\n[INFO] **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
       }],
     };
   }
@@ -501,7 +501,7 @@ export function formatTaskResult(taskId) {
 
   // Soft timeout indicator
   if (result.softTimeout) {
-    sections.push(`> ⏳ **Soft timeout** reached after ${result.timeoutSeconds}s. Process may still be running — partial result below.`);
+    sections.push(`> [WAIT] **Soft timeout** reached after ${result.timeoutSeconds}s. Process may still be running — partial result below.`);
   }
 
   // Agent failed to produce a response (either non-zero exit or caught error)
@@ -509,7 +509,7 @@ export function formatTaskResult(taskId) {
   const hasCaughtErrors = result.errors && result.errors.length > 0;
   
   if ((hasErrorExit || hasCaughtErrors) && !result.response) {
-    sections.push(`## ⚠️ Agent Failed (exit code ${result.exitCode})\n\nThe agent process terminated without producing a response.`);
+    sections.push(`## [ERR] Agent Failed (exit code ${result.exitCode})\n\nThe agent process terminated without producing a response.`);
     if (result.toolCalls?.length > 0) {
       const lastTools = result.toolCalls.slice(-5).map((t) => `- \`${t.name}\``).join('\n');
       sections.push(`### Last Tool Calls\n\n${lastTools}`);

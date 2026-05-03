@@ -7,6 +7,9 @@
  */
 
 import { spawn, execFile } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { getRunner, loadConfig } from './config.js';
 import { buildSshSpawn, parseRemotePid } from './ssh.js';
@@ -40,7 +43,20 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     if (sessionId) {
       args.push('--resume', sessionId);
     }
-    args.push('-p', prompt);
+    let finalPrompt = prompt;
+    try {
+      const teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
+      if (existsSync(teamRulesPath)) {
+        const rules = readFileSync(teamRulesPath, 'utf8').trim();
+        if (rules) {
+          finalPrompt = `[GLOBAL TEAM CONTEXT AND RULES]\n${rules}\n[/GLOBAL TEAM CONTEXT AND RULES]\n\nTask:\n${prompt}`;
+        }
+      }
+    } catch (e) {
+      // Ignore read errors
+    }
+
+    args.push('-p', finalPrompt);
     args.push(
       '--output-format', 'stream-json',
       '--approval-mode', approvalMode ?? DEFAULT_APPROVAL_MODE,
@@ -92,7 +108,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       pushTaskEvent(taskId, {
         type: 'message',
         role: 'system',
-        content: `⏳ Spawning Gemini process${isRemote ? ' via SSH' : ''}...`
+        content: `[WAIT] Spawning Gemini process${isRemote ? ' via SSH' : ''}...`
       });
     }
 
@@ -125,7 +141,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
         resolve({
           sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
-          response: responseText || '⏳ Agent is still working (soft timeout reached). Partial results returned.',
+          response: responseText || '[WAIT] Agent is still working (soft timeout reached). Partial results returned.',
           stats: null,
           toolCalls: toolUses.map((t) => ({
             name: t.tool_name ?? t.name ?? 'unknown',
@@ -184,7 +200,8 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
           content: '✅ Connected to Gemini CLI stream...'
         });
       }
-      buffer += chunk.toString();
+      let text = chunk.toString();
+      buffer += text;
       const lines = buffer.split('\n');
       buffer = lines.pop();
 
@@ -201,8 +218,15 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
           }
         }
 
+        let jsonStr = trimmed;
+        const braceIdx = jsonStr.indexOf('{');
+        if (braceIdx > 0) {
+          jsonStr = jsonStr.substring(braceIdx);
+        }
+        if (!jsonStr.startsWith('{')) continue;
+
         try {
-          const parsed = JSON.parse(trimmed);
+          const parsed = JSON.parse(jsonStr);
           events.push(parsed);
 
           // Max steps safety — kill runaway agents
@@ -222,8 +246,9 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     });
 
     child.stderr.on('data', (chunk) => {
-      stderrData += chunk.toString();
-      if (taskId) pushTaskStderr(taskId, chunk.toString());
+      const msg = chunk.toString();
+      stderrData += msg;
+      if (taskId) pushTaskStderr(taskId, msg);
     });
 
     child.on('close', (code) => {

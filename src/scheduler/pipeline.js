@@ -69,7 +69,8 @@ export function createPipeline(cwd, { name, steps, onError }) {
     name,
     steps: steps.map((s, i) => ({
       name: s.name,
-      prompt: s.prompt,
+      prompt: s.prompt || null,
+      contentSource: s.contentSource || s.content_source || null,
       skill: s.skill || null,
       group: s.group || null,
       count: s.count ? parseInt(s.count, 10) : 1,

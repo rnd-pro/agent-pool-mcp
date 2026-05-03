@@ -75,3 +75,17 @@ delegate_task_readonly({ prompt: "Run tests and verify..." })
 - **Respect file ownership** — no two sub-tasks edit the same file
 - **Provide enough context** — sub-tasks are stateless
 - **Verify after delegation** — check that sub-task output is correct
+
+## Post-Workflow Reflection (Self-Learning)
+
+As the Orchestrator, you own the **full trajectory** of a completed task. When a complex delegated workflow finishes, you MUST evaluate if the experience should be saved as a new skill to improve future performance.
+
+**Trigger:** The main workflow is completely finished and verified.
+**Action:** Call `search_by_tags` with `["orchestrator", "post-workflow"]` to find the reflection node, then use `get_workflow_content` to load it.
+**Data to provide:** When running the reflection step, summarize the trajectory:
+- How many steps/tool calls were taken?
+- How many retries or bounce-backs occurred?
+- Did the user correct your approach at any point?
+- Is this a reusable pattern?
+
+Follow the instructions in the reflection node to decide whether to skip, create, or update a skill using the `save_skill` tool. This is how the agentic ecosystem learns.

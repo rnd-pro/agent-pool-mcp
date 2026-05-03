@@ -27,6 +27,8 @@ import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDae
 import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
 import { createGroup, listGroups, getGroup } from './tools/groups.js';
 import { sendMessage, getMessages } from './tools/messaging.js';
+import { saveScript, listScripts } from './tools/scripts.js';
+import { trackFiles, untrackFiles } from '../../context-x-mcp/src/file-tracker.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
 
@@ -80,7 +82,7 @@ function discoverModels() {
   return new Promise((resolve) => {
     // 1. Try user config first
     try {
-      let configPath = path.join(os.homedir(), '.gemini', 'agent-portal.json');
+      let configPath = path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
       if (fs.existsSync(configPath)) {
         let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         let userModels = config.providerModels?.opencode;
@@ -193,7 +195,6 @@ export function createServer() {
   // causes message interleaving. stderr is our side-channel: the proxy
   // catches these from child.stderr and routes to WS chat clients.
   setNotifyCallback((taskId, type, data) => {
-    fs.appendFileSync('notify.log', `Notifying ${type} for ${taskId}\n`);
     const line = JSON.stringify({
       jsonrpc: '2.0',
       method: 'notifications/task/event',
@@ -300,6 +301,14 @@ export function createServer() {
           response = handleSendMessage(args); break;
         case 'get_messages':
           response = handleGetMessages(args); break;
+        case 'save_script':
+          response = { content: [{ type: 'text', text: `Script saved at ${saveScript(args.cwd || defaultCwd, args.name, args.code, args.ext)}` }] }; break;
+        case 'list_scripts':
+          response = { content: [{ type: 'text', text: JSON.stringify(listScripts(args.cwd || defaultCwd), null, 2) }] }; break;
+        case 'track_files':
+          response = { content: [{ type: 'text', text: `Tracked files: \n- ${trackFiles(args.cwd || defaultCwd, args.files).join('\n- ')}` }] }; break;
+        case 'untrack_files':
+          response = { content: [{ type: 'text', text: `Tracked files: \n- ${untrackFiles(args.cwd || defaultCwd, args.files).join('\n- ')}` }] }; break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -344,10 +353,10 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   }
 
   // Concurrency limit
-  const active = getActiveTasks();
-  if (active.length >= config.limits.maxConcurrent) {
+  const activeCount = listAllTasks().filter(t => t.status === 'running').length;
+  if (activeCount >= config.limits.maxConcurrent) {
     return {
-      content: [{ type: 'text', text: `⚠️ Concurrency limit reached (${active.length}/${config.limits.maxConcurrent} active tasks). Wait for existing tasks to complete or cancel them first.` }],
+      content: [{ type: 'text', text: `⚠️ Concurrency limit reached (${activeCount}/${config.limits.maxConcurrent} active tasks). Wait for existing tasks to complete or cancel them first.` }],
       isError: true,
     };
   }
@@ -409,13 +418,29 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     runner: args.runner,
     policy: policyPath,
     includeDirs: args.include_dirs,
+    groupConfig: args.groupConfig,
+    skill: args.skill,
   };
 
   createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode);
 
   // Route to the correct runner based on provider
   const provider = args.provider || 'gemini';
-  const runFn = provider === 'opencode' ? runOpencodeStreaming : runGeminiStreaming;
+  let runFn;
+  if (provider === 'mock') {
+    runFn = async (opts) => {
+      // Simulate a small delay and a streaming event for the integration test
+      await new Promise(r => setTimeout(r, 100));
+      process.stderr.write(`__TASK_NOTIFY__${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/task/event',
+        params: { taskId, type: 'message', data: { type: 'message', role: 'assistant', content: 'Integration Test Success' } }
+      })}\n`);
+      return { exitCode: 0, response: 'Mock final response' };
+    };
+  } else {
+    runFn = provider === 'opencode' ? runOpencodeStreaming : runGeminiStreaming;
+  }
 
   runFn(taskOpts)
     .then((result) => completeTask(taskId, result))
@@ -662,16 +687,16 @@ function handleListPipelines(args) {
   const recentRuns = runs.filter(r => r.status !== 'running').slice(0, 5);
 
   if (activeRuns.length > 0) {
-    const emojiMap = { success: '✅', failed: '❌', running: '🔄', pending: '⏸️', bounce_pending: '↩️', waiting_bounce: '⏳', skipped: '⏭️', cancelled: '🛑' };
+    const emojiMap = { success: '[OK]', failed: '[ERR]', running: '[RUN]', pending: '[PAUSE]', bounce_pending: '[BOUNCE]', waiting_bounce: '[WAIT]', skipped: '[SKIP]', cancelled: '[STOP]' };
     const lines = activeRuns.map(r => {
-      const stepsSummary = Object.entries(r.steps).map(([n, s]) => `${emojiMap[s.status] || '❓'}${n}`).join(' → ');
+      const stepsSummary = Object.entries(r.steps).map(([n, s]) => `${emojiMap[s.status] || '[?]'} ${n}`).join(' → ');
       return `- \`${r.id}\` (${r.pipelineName}) ${stepsSummary}`;
     });
     parts.push(`## Active Runs (${activeRuns.length})\n\n${lines.join('\n')}`);
   }
 
   if (recentRuns.length > 0) {
-    const lines = recentRuns.map(r => `- \`${r.id}\` ${r.status === 'success' ? '✅' : '❌'} ${r.pipelineName} (${r.completedAt || ''})`);
+    const lines = recentRuns.map(r => `- \`${r.id}\` ${r.status === 'success' ? '[OK]' : '[ERR]'} ${r.pipelineName} (${r.completedAt || ''})`);
     parts.push(`## Recent Runs\n\n${lines.join('\n')}`);
   }
 
@@ -690,18 +715,18 @@ function handleGetPipelineStatus(args) {
   const run = getRun(cwd, args.run_id);
   
   if (!run) {
-    return { content: [{ type: 'text', text: `❌ Pipeline run \`${args.run_id}\` not found.` }], isError: true };
+    return { content: [{ type: 'text', text: `[ERR] Pipeline run \`${args.run_id}\` not found.` }], isError: true };
   }
 
   const emojiMap = {
-    success: '✅',
-    failed: '❌',
-    running: '🔄',
-    pending: '⏸️',
-    bounce_pending: '↩️',
-    waiting_bounce: '⏳',
-    skipped: '⏭️',
-    cancelled: '🛑',
+    success: '[OK]',
+    failed: '[ERR]',
+    running: '[RUN]',
+    pending: '[PAUSE]',
+    bounce_pending: '[BOUNCE]',
+    waiting_bounce: '[WAIT]',
+    skipped: '[SKIP]',
+    cancelled: '[STOP]',
   };
 
   const lines = Object.entries(run.steps).map(([name, s]) => {
@@ -902,6 +927,7 @@ function handleDelegateToGroup(args) {
       policy: group.policy || undefined,
       include_dirs: group.include_dirs || undefined,
       timeout: args.timeout,
+      groupConfig: group,
     };
 
     const result = handleDelegate(delegateArgs, {

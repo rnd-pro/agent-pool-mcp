@@ -11,9 +11,13 @@
  */
 
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
+import { getGroupNextModel } from '../tools/groups.js';
 
 /**
  * Normalize an OpenCode JSON event into the unified format
@@ -74,9 +78,62 @@ function normalizeEvent(ev) {
  * @param {number} [options.timeout] - Timeout in seconds
  * @param {string} [options.sessionId] - Session to resume
  * @param {string} [options.taskId] - Task ID for tracking
+ * @param {object} [options.groupConfig] - Optional group config defining fallback_profiles
  * @returns {Promise<object>} Collected events and final response
  */
-export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, taskId }) {
+export async function runOpencodeStreaming(options) {
+  let attempt = 0;
+  const fallbacks = options.groupConfig?.fallback_profiles || [];
+  const rotationMode = options.groupConfig?.rotation_mode || 'error_fallback';
+  
+  let currentModel = options.model;
+  if (!currentModel) {
+    if (rotationMode === 'round_robin' && options.groupConfig?.name) {
+      currentModel = getGroupNextModel(options.cwd ?? process.cwd(), options.groupConfig.name);
+    } else if (fallbacks.length > 0) {
+      currentModel = fallbacks[0];
+    }
+  }
+
+  while (true) {
+    const runOpts = { ...options, model: currentModel };
+    
+    if (attempt > 0 && options.taskId) {
+      pushTaskEvent(options.taskId, {
+        type: 'message',
+        role: 'system',
+        content: `🔄 [Fallback Triggered] Retrying task with model: ${currentModel} (Attempt ${attempt + 1})`
+      });
+      console.error(`[opencode-runner] Fallback: Retrying with ${currentModel}`);
+    }
+
+    const result = await runOpencodeStreamingInternal(runOpts);
+
+    // Check if it failed
+    const hasError = result.exitCode !== 0 && result.exitCode !== null;
+    const hasStreamError = result.errors && result.errors.length > 0;
+    
+    if (rotationMode === 'error_fallback' && (hasError || hasStreamError)) {
+      // Find index of current model in fallbacks
+      let nextIndex = 0;
+      if (currentModel) {
+        nextIndex = fallbacks.indexOf(currentModel) + 1;
+      }
+      
+      if (nextIndex > 0 && nextIndex < fallbacks.length) {
+        // We have a fallback
+        currentModel = fallbacks[nextIndex];
+        attempt++;
+        continue;
+      }
+    }
+
+    // Return the result (either successful or exhausted fallbacks)
+    return result;
+  }
+}
+
+async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessionId, taskId, skill, groupConfig }) {
   return new Promise((resolve, reject) => {
     const args = ['run', '--format', 'json'];
 
@@ -88,7 +145,29 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
       args.push('--session', sessionId);
     }
 
-    args.push(prompt);
+    // Force OpenCode to use our title instead of generating one using its default Haiku fast-model
+    const titleParts = [];
+    if (groupConfig?.name) titleParts.push(`[Group:${groupConfig.name}]`);
+    if (skill) titleParts.push(`[Skill:${skill}]`);
+    
+    // We append a generic "Agent Task" if nothing else, or mix them.
+    const titleString = titleParts.length > 0 ? `${titleParts.join(' ')} Agent Task` : 'Agent Task';
+    args.push('--title', titleString);
+
+    let finalPrompt = prompt;
+    try {
+      const teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
+      if (existsSync(teamRulesPath)) {
+        const rules = readFileSync(teamRulesPath, 'utf8').trim();
+        if (rules) {
+          finalPrompt = `[GLOBAL TEAM CONTEXT AND RULES]\n${rules}\n[/GLOBAL TEAM CONTEXT AND RULES]\n\nTask:\n${prompt}`;
+        }
+      }
+    } catch (e) {
+      // Ignore read errors
+    }
+
+    args.push(finalPrompt);
 
     const config = loadConfig();
     const effectiveTimeout = timeout ?? config.limits.timeout;
@@ -111,7 +190,7 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
       pushTaskEvent(taskId, {
         type: 'message',
         role: 'system',
-        content: '⏳ Spawning OpenCode process...'
+        content: '[WAIT] Spawning OpenCode process...'
       });
     }
 
@@ -138,7 +217,7 @@ export function runOpencodeStreaming({ prompt, cwd, model, timeout, sessionId, t
 
         resolve({
           sessionId: detectedSessionId,
-          response: responseText || '⏳ Agent is still working (soft timeout reached). Partial results returned.',
+          response: responseText || '[WAIT] Agent is still working (soft timeout reached). Partial results returned.',
           stats: extractStats(events),
           toolCalls: extractToolCalls(events),
           toolResults: extractToolResults(events),

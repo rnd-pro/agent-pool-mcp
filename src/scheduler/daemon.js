@@ -12,10 +12,10 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, renameSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { matchesCron } from './cron.js';
-import { getGroup } from '../tools/groups.js';
+import { getGroup, getGroupNextModel } from '../tools/groups.js';
 import { getRunner } from '../runner/config.js';
 import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
@@ -289,9 +289,10 @@ function applySignals(run, signals, pipeline) {
  * @param {object} run - Current run state
  * @param {string} runId
  * @param {string} [bounceReason] - If bouncing back, the reason
+ * @param {string} [fallbackModel] - Specific model to use for error fallback
  * @returns {number[]} Array of child PIDs
  */
-function spawnStep(stepDef, run, runId, bounceReason) {
+function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
   const count = stepDef.count || 1;
   const pids = [];
 
@@ -308,9 +309,26 @@ function spawnStep(stepDef, run, runId, bounceReason) {
   const isRemote = runner && runner.type === 'ssh';
 
   for (let i = 0; i < count; i++) {
-    let prompt = stepDef.prompt;
+    let prompt = stepDef.prompt || '';
+
+    // ── Resolve contentSource if prompt is missing or we want to augment ──
+    if (stepDef.contentSource && !prompt) {
+      try {
+        const sourceJson = JSON.stringify(stepDef.contentSource).replace(/'/g, "'\\''");
+        // Use URL to get current directory robustly
+        const scriptPath = join(dirname(new URL(import.meta.url).pathname), 'resolve-content.js');
+        prompt = execSync(`node ${scriptPath} '${sourceJson}'`, { 
+          cwd: run.cwd || cwd, 
+          encoding: 'utf-8' 
+        }).trim();
+      } catch (err) {
+        console.error(`[daemon] Failed to resolve contentSource for step ${stepDef.name}: ${err.message}`);
+        prompt = `Failed to resolve content source: ${err.message}`;
+      }
+    }
+
     if (bounceReason) {
-      prompt = `${stepDef.prompt}\n\n⚠️ BOUNCE BACK: предыдущая попытка была отклонена следующим шагом.\nПричина: ${bounceReason}\nДополни и улучши результат.`;
+      prompt = `${prompt}\n\n⚠️ BOUNCE BACK: предыдущая попытка была отклонена следующим шагом.\nПричина: ${bounceReason}\nДополни и улучши результат.`;
     }
 
     if (count > 1) {
@@ -326,6 +344,16 @@ function spawnStep(stepDef, run, runId, bounceReason) {
       '--approval-mode', stepDef.approvalMode || 'yolo',
     ];
 
+    if (fallbackModel) {
+      args.push('-m', fallbackModel);
+    } else if (groupConfig.rotation_mode === 'round_robin') {
+      const nextModel = getGroupNextModel(run.cwd || cwd, stepDef.group);
+      if (nextModel) args.push('-m', nextModel);
+    } else if (groupConfig.fallback_profiles?.length > 0) {
+      // error_fallback: start with the first model
+      args.push('-m', groupConfig.fallback_profiles[0]);
+    }
+
     if (skill) {
       // Skills can be active via prompt injection, as we do for scheduled tasks
       args[1] = `Activate skill "${skill}" first.\n\n${args[1]}`;
@@ -340,7 +368,21 @@ function spawnStep(stepDef, run, runId, bounceReason) {
     }
 
     let spawnCmd, spawnArgs, spawnOpts;
-    if (isRemote) {
+    if (stepDef.type === 'execution_node') {
+      spawnCmd = 'sh';
+      spawnArgs = ['-c', stepDef.command || prompt];
+      spawnOpts = {
+        cwd: run.cwd || cwd,
+        env: {
+          ...process.env,
+          PIPELINE_RUN_ID: runId,
+          PIPELINE_STEP: stepDef.name
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
+      };
+      if (count > 1) spawnOpts.env.AGENT_INDEX = String(i);
+    } else if (isRemote) {
       const ssh = buildSshSpawn(runner, args, run.cwd || cwd);
       spawnCmd = ssh.command;
       spawnArgs = ssh.args;
@@ -495,12 +537,31 @@ function tickPipelines() {
           if (step.exitCode !== null && step.exitCode !== 0) {
             // Fail fast: kill siblings
             for (const pid of pids) if (isAlive(pid)) killGroup(pid);
-            step.status = 'failed';
-            step.completedAt = new Date().toISOString();
-            console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode})`);
-            if (pipeline.onError === 'stop') {
-              run.status = 'failed';
-              run.completedAt = new Date().toISOString();
+
+            const groupConfig = stepDef.group ? (getGroup(run.cwd || cwd, stepDef.group) || {}) : {};
+            const fallbacks = groupConfig.fallback_profiles || [];
+            const rotationMode = groupConfig.rotation_mode || 'error_fallback';
+            step.fallbackIndex = step.fallbackIndex || 0;
+
+            if (rotationMode === 'error_fallback' && step.fallbackIndex + 1 < fallbacks.length) {
+              step.fallbackIndex++;
+              const nextModel = fallbacks[step.fallbackIndex];
+              console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode}). Fallback: retrying all agents with model ${nextModel}`);
+              
+              step.status = 'running';
+              step.startedAt = new Date().toISOString();
+              step.exitCode = null; // reset
+              const newPids = spawnStep(stepDef, run, runId, null, nextModel);
+              step.pids = newPids;
+              if (newPids.length > 0) step.pid = newPids[0];
+            } else {
+              step.status = 'failed';
+              step.completedAt = new Date().toISOString();
+              console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode})`);
+              if (pipeline.onError === 'stop') {
+                run.status = 'failed';
+                run.completedAt = new Date().toISOString();
+              }
             }
             modified = true;
           } else if (livingPids === 0) {
@@ -524,12 +585,30 @@ function tickPipelines() {
                 console.error(`[pipeline] Step "${stepDef.name}" auto-completed (pid dead, exit: ${step.exitCode})`);
               } else {
                 // Failed
-                step.status = 'failed';
-                step.completedAt = new Date().toISOString();
-                console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode})`);
-                if (pipeline.onError === 'stop') {
-                  run.status = 'failed';
-                  run.completedAt = new Date().toISOString();
+                const groupConfig = stepDef.group ? (getGroup(run.cwd || cwd, stepDef.group) || {}) : {};
+                const fallbacks = groupConfig.fallback_profiles || [];
+                const rotationMode = groupConfig.rotation_mode || 'error_fallback';
+                step.fallbackIndex = step.fallbackIndex || 0;
+
+                if (rotationMode === 'error_fallback' && step.fallbackIndex + 1 < fallbacks.length) {
+                  step.fallbackIndex++;
+                  const nextModel = fallbacks[step.fallbackIndex];
+                  console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode}). Fallback: retrying with model ${nextModel} (${step.fallbackIndex + 1}/${fallbacks.length})`);
+                  
+                  step.status = 'running';
+                  step.startedAt = new Date().toISOString();
+                  step.exitCode = null; // reset
+                  const pids = spawnStep(stepDef, run, runId, null, nextModel);
+                  step.pids = pids;
+                  if (pids.length > 0) step.pid = pids[0];
+                } else {
+                  step.status = 'failed';
+                  step.completedAt = new Date().toISOString();
+                  console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode})`);
+                  if (pipeline.onError === 'stop') {
+                    run.status = 'failed';
+                    run.completedAt = new Date().toISOString();
+                  }
                 }
               }
               modified = true;
