@@ -14,6 +14,7 @@ import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { getRunner, loadConfig } from './config.js';
 import { buildSshSpawn, parseRemotePid } from './ssh.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
+import { createProcessWatchdog } from './timeout-manager.js';
 
 const DEFAULT_APPROVAL_MODE = 'yolo';
 
@@ -118,73 +119,44 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     let events = [];
     let stderrData = '';
     let buffer = '';
-    let watchdog = null;
-    let hardTimeoutHandle;
     let remotePid = null;
     let resolved = false;
     let hasReceivedData = false;
     let stepCount = 0;
 
-    if (timeoutMs > 0) {
-      watchdog = {
-        timer: null,
-        kick() {
-          if (this.timer) clearTimeout(this.timer);
-          this.timer = setTimeout(() => {
-            // Soft timeout: resolve with partial data
-            this.timer = null;
-            resolved = true;
+    let watchdog = createProcessWatchdog(timeoutMs, () => {
+      resolved = true;
 
-            let messages = events.filter((e) => e.type === 'message');
-            let toolUses = events.filter((e) => e.type === 'tool_use');
-            let responseText = messages
-              .filter((m) => m.role === 'assistant')
-              .map((m) => m.content ?? m.text ?? '')
-              .join('\n');
+      let messages = events.filter((e) => e.type === 'message');
+      let toolUses = events.filter((e) => e.type === 'tool_use');
+      let responseText = messages
+        .filter((m) => m.role === 'assistant')
+        .map((m) => m.content ?? m.text ?? '')
+        .join('\n');
 
-            resolve({
-              sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
-              response: responseText || 
-                '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
-              stats: null,
-              toolCalls: toolUses.map((t) => ({
-                name: t.tool_name ?? t.name ?? 'unknown',
-                args: t.parameters ?? t.arguments,
-              })),
-              toolResults: [],
-              errors: [],
-              exitCode: null,
-              totalEvents: events.length,
-              softTimeout: true,
-              timeoutSeconds: effectiveTimeout,
-            });
-          }, timeoutMs);
-        },
-        stop() {
-          if (this.timer) clearTimeout(this.timer);
-          this.timer = null;
-        }
-      };
-      watchdog.kick();
-
-      // Hard timeout safety net — kill process group to prevent infinite zombies
-      let hardTimeoutMs = Math.min(
-        timeoutMs * config.limits.hardTimeoutMultiplier,
-        config.limits.hardTimeoutMax * 1000,
-      );
-      hardTimeoutHandle = setTimeout(() => {
-        if (child.exitCode === null) {
-          console.error(`[gemini-runner] HARD TIMEOUT: killing PID ${child.pid} after ${hardTimeoutMs / 1000}s`);
-          killGroup(child.pid);
-        }
-      }, hardTimeoutMs);
-    }
+      resolve({
+        sessionId: events.find((e) => e.type === 'init')?.session_id ?? null,
+        response: responseText || 
+          '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
+        stats: null,
+        toolCalls: toolUses.map((t) => ({
+          name: t.tool_name ?? t.name ?? 'unknown',
+          args: t.parameters ?? t.arguments,
+        })),
+        toolResults: [],
+        errors: [],
+        exitCode: null,
+        totalEvents: events.length,
+        softTimeout: true,
+        timeoutSeconds: effectiveTimeout,
+      });
+    }, config, child);
+    
 
     child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
       if (watchdog) watchdog.stop();
-      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       
       let errMsg = `Failed to start agent process: ${err.message}`;
       if (taskId) pushTaskStderr(taskId, errMsg);
@@ -266,7 +238,6 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     child.on('close', (code) => {
       if (watchdog) watchdog.stop();
-      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       untrackChild(child.pid);
 
       // If already resolved via soft timeout, update with final complete result

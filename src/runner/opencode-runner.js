@@ -18,6 +18,7 @@ import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
 import { getGroupNextModel } from '../tools/groups.js';
+import { createProcessWatchdog } from './timeout-manager.js';
 
 /**
  * Normalize an OpenCode JSON event into the unified format
@@ -200,62 +201,34 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     let events = [];
     let stderrData = '';
     let buffer = '';
-    let watchdog = null;
-    let hardTimeoutHandle;
     let resolved = false;
     let detectedSessionId = null;
     let hasReceivedData = false;
     let stepCount = 0;
 
-    if (timeoutMs > 0) {
-      watchdog = {
-        timer: null,
-        kick() {
-          if (this.timer) clearTimeout(this.timer);
-          this.timer = setTimeout(() => {
-            this.timer = null;
-            resolved = true;
-            let responseText = extractResponseText(events);
-            resolve({
-              sessionId: detectedSessionId,
-              response: responseText || 
-                '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
-              stats: extractStats(events),
-              toolCalls: extractToolCalls(events),
-              toolResults: extractToolResults(events),
-              errors: [],
-              exitCode: null,
-              totalEvents: events.length,
-              softTimeout: true,
-              timeoutSeconds: effectiveTimeout,
-            });
-          }, timeoutMs);
-        },
-        stop() {
-          if (this.timer) clearTimeout(this.timer);
-          this.timer = null;
-        }
-      };
-      watchdog.kick();
-
-      // Hard timeout safety net — kill process group to prevent infinite zombies
-      let hardTimeoutMs = Math.min(
-        timeoutMs * config.limits.hardTimeoutMultiplier,
-        config.limits.hardTimeoutMax * 1000,
-      );
-      hardTimeoutHandle = setTimeout(() => {
-        if (child.exitCode === null) {
-          console.error(`[opencode-runner] HARD TIMEOUT: killing PID ${child.pid} after ${hardTimeoutMs / 1000}s`);
-          killGroup(child.pid);
-        }
-      }, hardTimeoutMs);
-    }
+    let watchdog = createProcessWatchdog(timeoutMs, () => {
+      resolved = true;
+      let responseText = extractResponseText(events);
+      resolve({
+        sessionId: detectedSessionId,
+        response: responseText || 
+          '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
+        stats: extractStats(events),
+        toolCalls: extractToolCalls(events),
+        toolResults: extractToolResults(events),
+        errors: [],
+        exitCode: null,
+        totalEvents: events.length,
+        softTimeout: true,
+        timeoutSeconds: effectiveTimeout,
+      });
+    }, config, child);
+    
 
     child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
       if (watchdog) watchdog.stop();
-      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
 
       let errMsg = `Failed to start opencode process: ${err.message}`;
       if (taskId) pushTaskStderr(taskId, errMsg);
@@ -334,7 +307,6 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
 
     child.on('close', (code) => {
       if (watchdog) watchdog.stop();
-      if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
       untrackChild(child.pid);
 
       // Process remaining buffer
