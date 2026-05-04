@@ -1,0 +1,8 @@
+# Policy to enforce single-agent execution (blocks orchestration)
+
+- rule: ALWAYS deny
+  tool: delegate_task
+- rule: ALWAYS deny
+  tool: delegate_task_readonly
+- rule: ALWAYS deny
+  tool: consult_peer
