@@ -12,31 +12,54 @@ import { createProcessWatchdog } from './timeout-manager.js';
 function normalizeEvent(ev) {
   switch (ev.type) {
     case 'text':
+    case 'message': {
+      let content = ev.part?.text ?? ev.text ?? ev.content ?? '';
+      if (!content) return null; // Filter empty to avoid premature UI cursors
+      let safeContent = typeof content === 'string' ? content : JSON.stringify(content);
+      if (!safeContent || safeContent.trim().length === 0) return null;
       return {
         type: 'message',
         role: 'assistant',
-        content: ev.part?.text ?? '',
+        content: safeContent,
       };
+    }
+
+    case 'tool_use':
+      if (ev.part?.type === 'tool' || ev.part?.tool || ev.tool || ev.type === 'tool_use') {
+        return [
+          {
+            type: 'tool_use',
+            name: ev.part?.tool ?? ev.part?.name ?? ev.tool ?? ev.name ?? 'unknown',
+            parameters: ev.part?.state?.input ?? ev.part?.parameters ?? ev.input ?? ev.parameters ?? {},
+          },
+          {
+            type: 'tool_result',
+            output: ev.part?.state?.output ?? ev.part?.result ?? ev.output ?? ev.result ?? '',
+            status: ev.part?.state?.status ?? ev.part?.status ?? ev.status ?? 'success',
+          }
+        ];
+      }
+      return null;
 
     case 'tool_call':
       return {
         type: 'tool_use',
-        name: ev.part?.name || 'unknown',
-        parameters: ev.part?.parameters || {},
+        name: ev.part?.name ?? ev.name ?? 'unknown',
+        parameters: ev.part?.parameters ?? ev.parameters ?? {},
       };
 
     case 'tool_result':
       return {
         type: 'tool_result',
-        output: ev.part?.result || '',
-        status: ev.part?.status ?? 'success',
+        output: ev.part?.result ?? ev.result ?? '',
+        status: ev.part?.status ?? ev.status ?? 'success',
       };
 
     case 'error':
       return {
         type: 'error',
-        message: ev.error?.message || JSON.stringify(ev.error),
-        error: ev.error?.message || JSON.stringify(ev.error),
+        message: ev.error?.message ?? ev.message ?? JSON.stringify(ev.error),
+        error: ev.error?.message ?? ev.message ?? JSON.stringify(ev.error),
       };
 
     case 'step_start':
@@ -252,7 +275,11 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
           if (taskId) {
             let normalized = normalizeEvent(parsed);
             if (normalized) {
-              pushTaskEvent(taskId, normalized);
+              if (Array.isArray(normalized)) {
+                normalized.forEach(n => pushTaskEvent(taskId, n));
+              } else {
+                pushTaskEvent(taskId, normalized);
+              }
             }
           }
         } catch (err) {
@@ -319,8 +346,10 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
  */
 function extractResponseText(events) {
   return events
-    .filter(e => e.type === 'text')
-    .map(e => e.part?.text ?? '')
+    .filter(e => e.type === 'text' || e.type === 'message')
+    .map(e => e.part?.text ?? e.text ?? e.content ?? '')
+    .map(text => typeof text === 'string' ? text : JSON.stringify(text))
+    .filter(text => text && text.trim().length > 0)
     .join('\n');
 }
 
@@ -331,10 +360,10 @@ function extractResponseText(events) {
  */
 function extractToolCalls(events) {
   return events
-    .filter(e => e.type === 'tool_call')
+    .filter(e => e.type === 'tool_call' || e.type === 'tool_use')
     .map(e => ({
-      name: e.part?.name || 'unknown',
-      args: e.part?.parameters || {},
+      name: e.part?.tool ?? e.part?.name ?? e.tool ?? e.name ?? 'unknown',
+      args: e.part?.state?.input ?? e.part?.parameters ?? e.input ?? e.parameters ?? {},
     }));
 }
 
@@ -345,10 +374,10 @@ function extractToolCalls(events) {
  */
 function extractToolResults(events) {
   return events
-    .filter(e => e.type === 'tool_result')
+    .filter(e => e.type === 'tool_result' || e.type === 'tool_use')
     .map(e => ({
-      name: e.part?.name || 'unknown',
-      output: (e.part?.result || '').toString().substring(0, 500),
+      name: e.part?.tool ?? e.part?.name ?? e.tool ?? e.name ?? 'unknown',
+      output: (e.part?.state?.output ?? e.part?.result ?? e.output ?? e.result ?? '').toString().substring(0, 500),
     }));
 }
 
@@ -362,8 +391,8 @@ function extractStats(events) {
   if (finishes.length === 0) return null;
   let last = finishes[finishes.length - 1];
   return {
-    cost: last.part?.cost ?? 0,
-    tokens: last.part?.tokens ?? null,
+    cost: last.part?.cost ?? last.cost ?? 0,
+    tokens: last.part?.tokens ?? last.tokens ?? null,
   };
 }
 
@@ -375,5 +404,5 @@ function extractStats(events) {
 function extractErrors(events) {
   return events
     .filter(e => e.type === 'error')
-    .map(e => e.error?.message || JSON.stringify(e.error));
+    .map(e => e.error?.message ?? e.message ?? JSON.stringify(e.error ?? e));
 }

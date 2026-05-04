@@ -504,10 +504,16 @@ export function formatTaskResult(taskId) {
     const modeLabel = entry.approvalMode === 'plan' ? '🔒 read-only' : entry.approvalMode === 'yolo' ? '✏️ full-access' : `⚙️ ${entry.approvalMode}`;
 
     return {
-      content: [{
-        type: 'text',
-        text: `[RUN] Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}\n- **PID**: ${entry.pid ?? 'unknown'}${pidStatus}${activityInfo}${stderrInfo}${progress}\n\n[INFO] **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
-      }],
+      content: [
+        {
+          type: 'text',
+          text: `[RUN] Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}\n- **PID**: ${entry.pid ?? 'unknown'}${pidStatus}${activityInfo}${stderrInfo}${progress}\n\n[INFO] **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
+        },
+        {
+          type: 'text',
+          text: `__EVENTS__:${JSON.stringify(entry.liveEvents)}`,
+        }
+      ],
     };
   }
 
