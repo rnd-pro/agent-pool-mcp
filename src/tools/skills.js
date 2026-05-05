@@ -54,24 +54,43 @@ function getProjectSkillsDir(cwd) {
 
 
 /**
- * Read skills from a directory.
+ * Read skills from a directory recursively.
  *
  * @param {string} dir - Skills directory
  * @param {string} tier - Tier label: 'project', 'global', 'built-in'
- * @returns {Array<{fileName: string, name: string, description: string, tier: string, filePath: string}>}
+ * @returns {Array<{fileName: string, name: string, description: string, category: string, tier: string, filePath: string}>}
  */
 function readSkillsFromDir(dir, tier) {
   if (!fs.existsSync(dir)) return [];
 
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('.'));
-  return files.map((fileName) => {
-    const filePath = path.join(dir, fileName);
+  const files = [];
+  function scan(currentDir) {
+    for (const f of fs.readdirSync(currentDir)) {
+      if (f.startsWith('.')) continue;
+      const fullPath = path.join(currentDir, f);
+      if (fs.statSync(fullPath).isDirectory()) {
+        scan(fullPath);
+      } else if (f.endsWith('.md')) {
+        files.push(fullPath);
+      }
+    }
+  }
+  scan(dir);
+
+  return files.map((filePath) => {
     const content = fs.readFileSync(filePath, 'utf-8');
     const { frontmatter } = parseFrontmatter(content);
+    const fileName = path.basename(filePath);
+    
+    const relativePath = path.relative(dir, filePath);
+    const dirName = path.dirname(relativePath);
+    const fallbackCategory = dirName === '.' ? 'uncategorized' : dirName.split(path.sep)[0];
+    
     return {
       fileName,
       name: frontmatter.name || fileName.replace('.md', ''),
       description: frontmatter.description || '(no description)',
+      category: frontmatter.category || frontmatter.group || fallbackCategory,
       tier,
       filePath,
     };
@@ -80,22 +99,28 @@ function readSkillsFromDir(dir, tier) {
 
 /**
  * List skills from all 3 tiers. Project overrides global, global overrides built-in.
+ * Sorted by category then name.
  *
  * @param {string} cwd - Project root
- * @returns {Array<{fileName: string, name: string, description: string, tier: string, filePath: string}>}
+ * @returns {Array<{fileName: string, name: string, description: string, category: string, tier: string, filePath: string}>}
  */
 export function listSkills(cwd) {
   const builtIn = readSkillsFromDir(BUILTIN_SKILLS_DIR, 'built-in');
   const userGlobal = readSkillsFromDir(USER_GLOBAL_SKILLS_DIR, 'global');
   const project = readSkillsFromDir(getProjectSkillsDir(cwd), 'project');
 
-  // Merge: project overrides global overrides built-in (by fileName)
+  // Merge: project overrides global overrides built-in (by name)
   const merged = new Map();
-  for (const skill of builtIn) merged.set(skill.fileName, skill);
-  for (const skill of userGlobal) merged.set(skill.fileName, skill);
-  for (const skill of project) merged.set(skill.fileName, skill);
+  for (const skill of builtIn) merged.set(skill.name, skill);
+  for (const skill of userGlobal) merged.set(skill.name, skill);
+  for (const skill of project) merged.set(skill.name, skill);
 
-  return [...merged.values()];
+  const arr = [...merged.values()];
+  arr.sort((a, b) => {
+    if (a.category !== b.category) return a.category.localeCompare(b.category);
+    return a.name.localeCompare(b.name);
+  });
+  return arr;
 }
 
 /**
@@ -106,25 +131,17 @@ export function listSkills(cwd) {
  * @returns {{filePath: string, content: string, tier: string} | null}
  */
 export function findSkill(cwd, skillName) {
-  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
-
-  const dirs = [
-    { dir: getProjectSkillsDir(cwd), tier: 'project' },
-    { dir: USER_GLOBAL_SKILLS_DIR, tier: 'global' },
-    { dir: BUILTIN_SKILLS_DIR, tier: 'built-in' },
-  ];
-
-  for (const { dir, tier } of dirs) {
-    const filePath = path.join(dir, fileName);
-    if (fs.existsSync(filePath)) {
-      return {
-        filePath,
-        content: fs.readFileSync(filePath, 'utf-8'),
-        tier,
-      };
-    }
+  const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
+  const all = listSkills(cwd);
+  const match = all.find(s => s.name === targetName || s.fileName === skillName);
+  
+  if (match) {
+    return {
+      filePath: match.filePath,
+      content: fs.readFileSync(match.filePath, 'utf-8'),
+      tier: match.tier,
+    };
   }
-
   return null;
 }
 
@@ -168,13 +185,15 @@ export function createSkill(cwd, skillName, description, instructions, scope = '
  * @returns {boolean} Whether the file was deleted
  */
 export function deleteSkill(cwd, skillName, scope = 'project') {
-  const targetDir = scope === 'global' ? USER_GLOBAL_SKILLS_DIR : getProjectSkillsDir(cwd);
-  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
-  const filePath = path.join(targetDir, fileName);
-
-  if (!fs.existsSync(filePath)) return false;
-  fs.unlinkSync(filePath);
-  return true;
+  const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
+  const all = listSkills(cwd);
+  const match = all.find(s => s.tier === scope && (s.name === targetName || s.fileName === skillName));
+  
+  if (match && fs.existsSync(match.filePath)) {
+    fs.unlinkSync(match.filePath);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -186,33 +205,27 @@ export function deleteSkill(cwd, skillName, scope = 'project') {
  * @returns {{installed: boolean, from: string, to: string, tier: string} | null}
  */
 export function installSkill(cwd, skillName) {
-  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
-
-  // Only search global and built-in (not project — that's where we're installing to)
-  const dirs = [
-    { dir: USER_GLOBAL_SKILLS_DIR, tier: 'global' },
-    { dir: BUILTIN_SKILLS_DIR, tier: 'built-in' },
-  ];
-
-  for (const { dir, tier } of dirs) {
-    const sourcePath = path.join(dir, fileName);
-    if (fs.existsSync(sourcePath)) {
-      const projectDir = getProjectSkillsDir(cwd);
-      fs.mkdirSync(projectDir, { recursive: true });
-
-      const destPath = path.join(projectDir, fileName);
-      let content = fs.readFileSync(sourcePath, 'utf-8');
-
-      // Add origin comment after frontmatter
-      const date = new Date().toISOString().split('T')[0];
-      const originComment = `<!-- Installed from ${tier}: ${sourcePath} on ${date} -->`;
-      content = content.replace(/^(---\n[\s\S]*?\n---\n)/, `$1\n${originComment}\n`);
-
-      fs.writeFileSync(destPath, content, 'utf-8');
-      return { installed: true, from: sourcePath, to: destPath, tier };
-    }
+  const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
+  
+  const builtIn = readSkillsFromDir(BUILTIN_SKILLS_DIR, 'built-in');
+  const userGlobal = readSkillsFromDir(USER_GLOBAL_SKILLS_DIR, 'global');
+  const available = [...userGlobal, ...builtIn];
+  
+  const match = available.find(s => s.name === targetName || s.fileName === skillName);
+  if (match && fs.existsSync(match.filePath)) {
+    const projectDir = getProjectSkillsDir(cwd);
+    fs.mkdirSync(projectDir, { recursive: true });
+    
+    const destPath = path.join(projectDir, match.fileName);
+    let content = fs.readFileSync(match.filePath, 'utf-8');
+    
+    const date = new Date().toISOString().split('T')[0];
+    const originComment = `<!-- Installed from ${match.tier}: ${match.filePath} on ${date} -->`;
+    content = content.replace(/^(---\n[\s\S]*?\n---\n)/, `$1\n${originComment}\n`);
+    
+    fs.writeFileSync(destPath, content, 'utf-8');
+    return { installed: true, from: match.filePath, to: destPath, tier: match.tier };
   }
-
   return null;
 }
 
@@ -228,31 +241,25 @@ export function installSkill(cwd, skillName) {
  * @returns {{name: string, provisioned: boolean, tier: string} | null}
  */
 export function provisionSkill(cwd, skillName) {
-  const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
-  const canonicalName = skillName.replace('.md', '');
-
-  // Check if already in project
-  const projectPath = path.join(getProjectSkillsDir(cwd), fileName);
-  if (fs.existsSync(projectPath)) {
-    return { name: canonicalName, provisioned: false, tier: 'project' };
+  const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
+  
+  const project = readSkillsFromDir(getProjectSkillsDir(cwd), 'project');
+  const projectMatch = project.find(s => s.name === targetName || s.fileName === skillName);
+  if (projectMatch) {
+    return { name: projectMatch.name, provisioned: false, tier: 'project' };
   }
 
-  // Search global and built-in
-  const dirs = [
-    { dir: USER_GLOBAL_SKILLS_DIR, tier: 'global' },
-    { dir: BUILTIN_SKILLS_DIR, tier: 'built-in' },
-  ];
-
-  for (const { dir, tier } of dirs) {
-    const sourcePath = path.join(dir, fileName);
-    if (fs.existsSync(sourcePath)) {
-      const projectDir = getProjectSkillsDir(cwd);
-      fs.mkdirSync(projectDir, { recursive: true });
-
-      // Copy to project for native Gemini CLI discovery
-      fs.copyFileSync(sourcePath, projectPath);
-      return { name: canonicalName, provisioned: true, tier };
-    }
+  const builtIn = readSkillsFromDir(BUILTIN_SKILLS_DIR, 'built-in');
+  const userGlobal = readSkillsFromDir(USER_GLOBAL_SKILLS_DIR, 'global');
+  const available = [...userGlobal, ...builtIn];
+  const match = available.find(s => s.name === targetName || s.fileName === skillName);
+  
+  if (match && fs.existsSync(match.filePath)) {
+    const projectDir = getProjectSkillsDir(cwd);
+    fs.mkdirSync(projectDir, { recursive: true });
+    const destPath = path.join(projectDir, match.fileName);
+    fs.copyFileSync(match.filePath, destPath);
+    return { name: match.name, provisioned: true, tier: match.tier };
   }
 
   return null;
