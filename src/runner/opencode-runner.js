@@ -29,8 +29,8 @@ function normalizeEvent(ev) {
         return [
           {
             type: 'tool_use',
-            name: ev.part?.tool ?? ev.part?.name ?? ev.tool ?? ev.name ?? 'unknown',
-            parameters: ev.part?.state?.input ?? ev.part?.parameters ?? ev.input ?? ev.parameters ?? {},
+            name: ev.part?.tool ?? ev.part?.name ?? ev.tool ?? ev.name ?? ev.tool_name ?? ev.toolCall?.name ?? ev.tool_call?.name ?? ev.function?.name ?? 'unknown',
+            parameters: ev.part?.state?.input ?? ev.part?.parameters ?? ev.input ?? ev.parameters ?? ev.arguments ?? ev.toolCall?.arguments ?? ev.tool_call?.arguments ?? {},
           },
           {
             type: 'tool_result',
@@ -44,8 +44,8 @@ function normalizeEvent(ev) {
     case 'tool_call':
       return {
         type: 'tool_use',
-        name: ev.part?.name ?? ev.name ?? 'unknown',
-        parameters: ev.part?.parameters ?? ev.parameters ?? {},
+        name: ev.part?.name ?? ev.name ?? ev.tool_name ?? ev.toolCall?.name ?? ev.tool_call?.name ?? ev.function?.name ?? 'unknown',
+        parameters: ev.part?.parameters ?? ev.parameters ?? ev.arguments ?? ev.toolCall?.arguments ?? ev.tool_call?.arguments ?? {},
       };
 
     case 'tool_result':
@@ -362,8 +362,8 @@ function extractToolCalls(events) {
   return events
     .filter(e => e.type === 'tool_call' || e.type === 'tool_use')
     .map(e => ({
-      name: e.part?.tool ?? e.part?.name ?? e.tool ?? e.name ?? 'unknown',
-      args: e.part?.state?.input ?? e.part?.parameters ?? e.input ?? e.parameters ?? {},
+      name: e.part?.tool ?? e.part?.name ?? e.tool ?? e.name ?? e.tool_name ?? e.toolCall?.name ?? e.tool_call?.name ?? e.function?.name ?? 'unknown',
+      args: e.part?.state?.input ?? e.part?.parameters ?? e.input ?? e.parameters ?? e.arguments ?? e.toolCall?.arguments ?? e.tool_call?.arguments ?? {},
     }));
 }
 
@@ -376,7 +376,7 @@ function extractToolResults(events) {
   return events
     .filter(e => e.type === 'tool_result' || e.type === 'tool_use')
     .map(e => ({
-      name: e.part?.tool ?? e.part?.name ?? e.tool ?? e.name ?? 'unknown',
+      name: e.part?.tool ?? e.part?.name ?? e.tool ?? e.name ?? e.tool_name ?? e.toolCall?.name ?? e.tool_call?.name ?? e.function?.name ?? 'unknown',
       output: (e.part?.state?.output ?? e.part?.result ?? e.output ?? e.result ?? '').toString().substring(0, 500),
     }));
 }
