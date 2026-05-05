@@ -109,7 +109,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       let toolUses = events.filter((e) => e.type === 'tool_use');
       let responseText = messages
         .filter((m) => m.role === 'assistant')
-        .map((m) => m.text || '')
+        .map((m) => m.content ?? m.text ?? '')
         .join('\n');
 
       resolve({
@@ -225,7 +225,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         let toolResults = events.filter((e) => e.type === 'tool_result');
         let resultEvent = events.find((e) => e.type === 'result');
         let errors = events.filter((e) => e.type === 'error');
-        let responseText = messages.filter((m) => m.role === 'assistant').map((m) => m.text || '').join('\n');
+        let responseText = messages.filter((m) => m.role === 'assistant').map((m) => m.content ?? m.text ?? '').join('\n');
         if (taskId) {
           updateTaskResult(taskId, {
             sessionId: events.find((e) => e.type === 'init')?.session_id || null,
@@ -253,7 +253,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
       let responseText = messages
         .filter((m) => m.role === 'assistant')
-        .map((m) => m.text || '')
+        .map((m) => m.content ?? m.text ?? '')
         .join('\n');
 
       let initEvent = events.find((e) => e.type === 'init');

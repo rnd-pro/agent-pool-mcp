@@ -610,7 +610,10 @@ export function formatTaskResult(taskId) {
   sections.push(`## Stats\n\n${statParts.join('\n')}`);
 
   return {
-    content: [{ type: 'text', text: sections.join('\n\n---\n\n') }],
+    content: [
+      { type: 'text', text: sections.join('\n\n---\n\n') },
+      { type: 'text', text: `__RESULT_JSON__:${JSON.stringify(result)}` }
+    ],
   };
 }
 
