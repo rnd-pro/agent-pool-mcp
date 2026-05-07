@@ -126,7 +126,7 @@ export async function runOpencodeStreaming(options) {
   }
 }
 
-async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessionId, taskId, skill, groupConfig }) {
+async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessionId, taskId, skill, groupConfig, chat_id }) {
   return new Promise((resolve, reject) => {
     let args = ['run', '--format', 'json'];
 
@@ -170,8 +170,8 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
 
     // Create isolated config dir so sub-agent connects to singleton portal
     let portalUrl = resolvePortalUrl();
-    if (portalUrl && options.chat_id) {
-      portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(options.chat_id);
+    if (portalUrl && chat_id) {
+      portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(chat_id);
     }
     let envOverrides = {};
     let hubTmpDir = null;

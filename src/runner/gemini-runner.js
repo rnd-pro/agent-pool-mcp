@@ -303,12 +303,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       });
     });
 
-    child.on('error', (err) => {
-      clearTimeout(timeoutHandle);
-      untrackChild(child.pid);
-      if (resolved) return;
-      reject(new Error(`Failed to spawn gemini: ${err.message}`));
-    });
+
 
     child.stdin.end();
   });
