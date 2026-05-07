@@ -8,6 +8,8 @@ import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../
 import { loadConfig } from './config.js';
 import { getGroupNextModel } from '../tools/groups.js';
 import { createProcessWatchdog } from './timeout-manager.js';
+import { createOpenCodeEnv, cleanupTmpConfig } from './provider-config.js';
+import { resolvePortalUrl } from './url-resolver.js';
 
 function normalizeEvent(ev) {
   switch (ev.type) {
@@ -155,7 +157,8 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
         }
       }
     } catch (e) {
-          }
+      // Ignore if team rules file doesn't exist or isn't readable
+    }
 
     args.push(finalPrompt);
 
@@ -163,12 +166,32 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     let effectiveTimeout = timeout ?? config.limits.timeout;
     let timeoutMs = effectiveTimeout * 1000;
 
+    let effectiveCwd = cwd ?? process.cwd();
+
+    // Create isolated config dir so sub-agent connects to singleton portal
+    let portalUrl = resolvePortalUrl();
+    if (portalUrl && options.chat_id) {
+      portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(options.chat_id);
+    }
+    let envOverrides = {};
+    let hubTmpDir = null;
+    if (portalUrl) {
+      let hub = createOpenCodeEnv(portalUrl);
+      hubTmpDir = hub.tmpDir;
+      envOverrides = hub.envOverrides;
+    }
+
+    let currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
+
     let spawnOpts = {
-      cwd: cwd ?? process.cwd(),
+      cwd: effectiveCwd,
       env: {
         ...process.env,
         TERM: 'dumb',
         CI: '1',
+        AGENT_POOL_DEPTH: String(currentDepth + 1),
+        ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
+        ...envOverrides,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
@@ -301,6 +324,11 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     child.on('close', (code) => {
       if (watchdog) watchdog.stop();
       untrackChild(child.pid);
+
+      // Remove isolated config temp dir
+      if (hubTmpDir) {
+        try { cleanupTmpConfig(hubTmpDir); } catch (e) { /* non-critical */ }
+      }
 
       if (buffer.trim()) {
         try {

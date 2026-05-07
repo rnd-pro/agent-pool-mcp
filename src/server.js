@@ -29,6 +29,7 @@ import { createGroup, listGroups, getGroup } from './tools/groups.js';
 import { sendMessage, getMessages } from './tools/messaging.js';
 import { saveScript, listScripts } from './tools/scripts.js';
 import { getBoardStore } from './tools/board-store.js';
+import { resolveAgent, buildAgentCatalog } from './agents/agent-resolver.js';
 import { trackFiles, untrackFiles } from '../../context-x-mcp/src/file-tracker.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
@@ -235,10 +236,22 @@ export function createServer() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
-    // Guard: tools that need gemini
+    // Guard: tools that require external CLI providers
     if (GEMINI_TOOLS.has(name)) {
-      if (!checkGemini()) return GEMINI_REQUIRED_ERROR;
       if (isDepthExceeded()) return DEPTH_EXCEEDED_ERROR;
+
+      const isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(name);
+      if (isDelegateTool) {
+        const provider = args.provider || (checkGemini() ? 'gemini' : (checkOpencode() ? 'opencode' : 'gemini'));
+        if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
+        if (provider === 'opencode' && !checkOpencode()) {
+          return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
+        }
+        // Force resolved provider into args so downstream handlers don't fallback to hardcoded gemini
+        args.provider = provider;
+      } else {
+        if (!checkGemini()) return GEMINI_REQUIRED_ERROR;
+      }
     }
 
     let response;
@@ -366,8 +379,35 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
 
   let prompt = args.prompt;
 
-  // Hybrid skill activation: provision to project, then instruct native activation
-  if (args.skill) {
+  // ── Agent context resolution ──────────────────────────────
+  // Priority: explicit system_prompt > agent_slug resolution > skill (legacy)
+  let agentDef = null;
+  let agentContext = '';
+
+  if (args.system_prompt) {
+    // Portal-level injection: pre-resolved agent prompt
+    agentContext = args.system_prompt;
+  } else if (args.agent_slug) {
+    // Resolve agent from .agents/agents/{slug}.md
+    agentDef = resolveAgent(cwd, args.agent_slug);
+    if (agentDef) {
+      agentContext = agentDef.prompt;
+      console.error(`[agent-pool] Resolved agent '${args.agent_slug}': ${agentDef.skills.length} skills, policy=${agentDef.policy}`);
+    } else {
+      console.error(`[agent-pool] Agent '${args.agent_slug}' not found in ${cwd}/.agents/agents/`);
+    }
+  }
+
+  // For orchestrator role: inject available agent catalog into context
+  if (agentDef?.role === 'orchestrator') {
+    const catalog = buildAgentCatalog(cwd);
+    if (catalog) {
+      agentContext += `\n\n${catalog}`;
+    }
+  }
+
+  // Legacy skill activation (fallback when no agent_slug)
+  if (!agentContext && args.skill) {
     const provisioned = provisionSkill(cwd, args.skill);
     if (provisioned) {
       prompt = `IMPORTANT: Before starting the task, activate the skill "${provisioned.name}" using the activate_skill tool. Then proceed with the task.\n\n${prompt}`;
@@ -377,7 +417,8 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   }
 
   // Resolve policy path (built-in templates or absolute path)
-  let policyPath = args.policy ?? null;
+  // Agent policy as default if no explicit policy
+  let policyPath = args.policy ?? (agentDef?.policy && agentDef.policy !== 'read-write' ? agentDef.policy : null);
   if (policyPath && !path.isAbsolute(policyPath)) {
     const policiesDir = path.resolve(__dirname, '..', 'policies');
     let builtinPolicy = path.resolve(policiesDir, policyPath);
@@ -408,7 +449,13 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   }
   const scopeNotice = `[Workspace Scope] You have access to these directories:\n${workspaceDirs.map((d) => `  - ${d}`).join('\n')}\nIf you need files outside these paths, use shell commands (cat, find, ls) instead of file tools. Do NOT attempt list_directory or read_file on paths outside your workspace — they will be rejected by the sandbox.`;
 
-  prompt = `[Agent Mode: ${resolvedMode.toUpperCase()}] ${modeNotice}\n\n${scopeNotice}\n\n${prompt}`;
+  // Assemble final prompt: mode → scope → agent context → user task
+  let promptParts = [`[Agent Mode: ${resolvedMode.toUpperCase()}] ${modeNotice}`, scopeNotice];
+  if (agentContext) {
+    promptParts.push(`[Agent Context]\n${agentContext}\n[/Agent Context]`);
+  }
+  promptParts.push(prompt);
+  prompt = promptParts.join('\n\n');
 
   const taskOpts = {
     prompt,
@@ -423,9 +470,14 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     includeDirs: args.include_dirs,
     groupConfig: args.groupConfig,
     skill: args.skill,
+    chat_id: args.chat_id,
   };
 
-  createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd, args.agent_slug, args.parent_chat_id, args.chat_id);
+  createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd,
+    agentDef?.slug ?? args.agent_slug ?? 'unknown',
+    args.parent_chat_id, args.chat_id,
+    agentDef?.icon, agentDef?.color
+  );
 
   // Route to the correct runner based on provider
   const provider = args.provider || 'gemini';
@@ -476,9 +528,9 @@ function handleDelegateTask(args) {
 
 function handleDelegateReadonly(args) {
   return handleDelegate(args, {
-    approvalMode: loadConfig().safety.defaultApprovalMode,
+    approvalMode: 'plan',
     emoji: '🔍',
-    label: 'Analysis task delegated (full access).',
+    label: 'Analysis task delegated (read-only access).',
   });
 }
 

@@ -47,6 +47,7 @@ function getTaskMeta(taskId) {
     completedAt: entry.completedAt,
     error: entry.error,
     eventCount: entry.liveEvents?.length ?? 0,
+    chatId: entry.chatId,
   };
 }
 
@@ -101,8 +102,10 @@ const COACHING_HINTS = [
  * @param {string} [agentSlug] - Agent identifier
  * @param {string} [parentId] - Parent task/chat ID for board tree
  * @param {string} [chatId] - Bound chat ID for UI navigation
+ * @param {string} [icon] - Material Symbols icon name for board card
+ * @param {string} [color] - CSS color for board card
  */
-export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process.cwd(), agentSlug = 'unknown', parentId = null, chatId = null) {
+export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process.cwd(), agentSlug = 'unknown', parentId = null, chatId = null, icon = null, color = null) {
   taskStore.set(taskId, {
     cwd,
     status: 'running',
@@ -115,6 +118,8 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     pollCount: 0,
     waitHint: waitHint ?? null,
     pid: null,
+    parentId: parentId ?? null,
+    chatId: chatId ?? null,
     liveEvents: [],
     lastEventAt: null,
     stderr: '',
@@ -134,6 +139,8 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     parentId,
     chatId,
     agentSlug,
+    icon: icon || 'smart_toy',
+    color: color || '#666',
     description: boardDesc,
     status: 'queued',
     createdAt: new Date().toISOString()
@@ -275,6 +282,13 @@ export function cancelTask(taskId) {
   let killed = false;
   if (entry.pid) {
     killed = killGroup(entry.pid);
+  }
+  
+  // Recursively cancel all child tasks
+  for (const [childTaskId, childEntry] of taskStore.entries()) {
+    if (childEntry.parentId === taskId && childEntry.status === 'running') {
+      cancelTask(childTaskId);
+    }
   }
   entry.status = 'cancelled';
   entry.completedAt = Date.now();

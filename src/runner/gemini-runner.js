@@ -8,13 +8,15 @@ import { getRunner, loadConfig } from './config.js';
 import { buildSshSpawn, parseRemotePid } from './ssh.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { createProcessWatchdog } from './timeout-manager.js';
+import { createGeminiEnv, cleanupTmpConfig } from './provider-config.js';
+import { resolvePortalUrl } from './url-resolver.js';
 
 const DEFAULT_APPROVAL_MODE = 'yolo';
 
 export { DEFAULT_APPROVAL_MODE };
 
 
-export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy, includeDirs }) {
+export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy, includeDirs, chat_id }) {
   return new Promise((resolve, reject) => {
     let runner = getRunner(runnerId);
     let isRemote = runner.type === 'ssh';
@@ -33,7 +35,8 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
         }
       }
     } catch (e) {
-          }
+      // Ignore if team rules file doesn't exist or isn't readable
+    }
 
     args.push('-p', finalPrompt);
     args.push(
@@ -58,6 +61,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     let timeoutMs = effectiveTimeout * 1000;
 
     let spawnCmd, spawnArgs, spawnOpts;
+    let hubTmpDir = null; // track for cleanup
 
     if (isRemote) {
       let ssh = buildSshSpawn(runner, args, cwd ?? process.cwd());
@@ -68,13 +72,29 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
       spawnCmd = 'gemini';
       spawnArgs = args;
       let currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
+      let effectiveCwd = cwd ?? process.cwd();
+
+      // Create isolated config dir so sub-agent connects to singleton portal
+      let portalUrl = resolvePortalUrl();
+      if (portalUrl && chat_id) {
+        portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(chat_id);
+      }
+      let envOverrides = {};
+      if (portalUrl) {
+        let hub = createGeminiEnv(portalUrl);
+        hubTmpDir = hub.tmpDir;
+        envOverrides = hub.envOverrides;
+      }
+
       spawnOpts = {
-        cwd: cwd ?? process.cwd(),
+        cwd: effectiveCwd,
         env: {
           ...process.env,
           TERM: 'dumb',
           CI: '1',
           AGENT_POOL_DEPTH: String(currentDepth + 1),
+          ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
+          ...envOverrides,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
@@ -215,6 +235,11 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     child.on('close', (code) => {
       if (watchdog) watchdog.stop();
       untrackChild(child.pid);
+
+      // Remove isolated config temp dir
+      if (hubTmpDir) {
+        try { cleanupTmpConfig(hubTmpDir); } catch (e) { /* non-critical */ }
+      }
 
             if (resolved) {
         if (buffer.trim()) {

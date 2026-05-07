@@ -64,6 +64,8 @@ export class BoardStore {
       parentId: node.parentId,
       chatId: node.chatId,
       agentSlug: node.agentSlug || 'unknown',
+      icon: node.icon || 'smart_toy',
+      color: node.color || '#666',
       description: node.description || '',
       status: node.status || 'queued',
       createdAt: node.createdAt || new Date().toISOString(),
