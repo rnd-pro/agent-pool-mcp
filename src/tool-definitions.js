@@ -79,7 +79,7 @@ export function getToolDefinitions(ctx = {}) {
         policy: { type: 'string', description: 'Policy file for tool restrictions. Use built-in template name (e.g. "read-only", "safe-edit") or absolute path to .yaml policy file.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results. Guides the calling agent on what to do while waiting.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd. Use this to grant access to other project dirs, config dirs, etc.' },
-        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "backend-engineer"). Auto-resolves prompt from .agents/agents/{slug}.md with composed skills. Takes priority over legacy "skill" parameter.' },
+        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "backend-engineer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md with composed skills. Takes priority over legacy "skill" parameter.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution. Used by portal for portal-level agent injection.' },
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'Chat ID to bind this task to in the UI. Optional.' },
@@ -112,7 +112,7 @@ export function getToolDefinitions(ctx = {}) {
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd.' },
-        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "code-reviewer"). Auto-resolves prompt from .agents/agents/{slug}.md.' },
+        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "code-reviewer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution.' },
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'The chat ID created for this task via create_chat. Optional.' },
@@ -185,7 +185,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'list_skills',
-    description: 'List available CLI skills from all tiers: project (.agents/skills/), user-global (~/.agent-portal/skills/), and built-in (shipped with agent-pool). Shows tier label for each skill.',
+    description: 'List available CLI skills from the project .agent-portal/skills/ directory. Skills are markdown files with YAML frontmatter.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -203,7 +203,7 @@ export function getToolDefinitions(ctx = {}) {
         skill_name: { type: 'string', description: 'Skill name (used as filename, e.g. "code-reviewer").' },
         description: { type: 'string', description: 'Short description of what the skill does.' },
         instructions: { type: 'string', description: 'Full markdown instructions for the skill. Define the agent role, rules, and output format.' },
-        scope: { type: 'string', enum: ['project', 'global'], description: 'Where to save: "project" (default, .agents/skills/) or "global" (~/.agent-portal/skills/).' },
+        scope: { type: 'string', description: 'Where to save: .agent-portal/skills/ in the current project.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
@@ -243,7 +243,7 @@ export function getToolDefinitions(ctx = {}) {
     description: [
       'Schedule a Gemini CLI agent to run on a cron schedule or as a delayed one-shot.',
       'Spawns a persistent daemon that survives IDE/CLI restarts.',
-      'Results are saved to .agents/scheduled-results/ and can be retrieved with get_scheduled_results.',
+      'Results are saved to .agent-portal/scheduled-results/ and can be retrieved with get_scheduled_results.',
       '',
       'Cron format: standard 5-field (minute hour day month weekday).',
       'Examples: "*/30 * * * *" (every 30 min), "0 9 * * MON-FRI" (9am weekdays), "0 */2 * * *" (every 2 hours).',
@@ -511,7 +511,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'save_script',
-    description: 'Save a local automation script to the project database (.agents/scripts/). This is useful for zero-token execution nodes.',
+    description: 'Save a local automation script to the project database (.agent-portal/scripts/). This is useful for zero-token execution nodes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -535,7 +535,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'track_files',
-    description: 'Track active files in the current project context (.agents/active_context.json). Useful to persist file context between pipeline steps.',
+    description: 'Track active files in the current project context (.agent-portal/active_context.json). Useful to persist file context between pipeline steps.',
     inputSchema: {
       type: 'object',
       properties: {

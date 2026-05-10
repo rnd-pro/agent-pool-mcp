@@ -17,14 +17,13 @@ async function resolve() {
   }
 
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const contextXDir = join(__dirname, '../../../context-x-mcp');
   
   try {
-    const { buildTagIndex, searchByTags } = await import(join(contextXDir, 'src/workflow-index.js'));
-    const workflowsDir = join(contextXDir, 'workflows');
+    const { buildTagIndex, searchByTags } = await import(join(__dirname, '../tools/workflow-index.js'));
+    const workflowsDir = join(process.cwd(), '.agent-portal', 'workflows');
     const { nodes, tagIndex } = buildTagIndex(workflowsDir);
 
-    const { getTrackedFiles } = await import(join(contextXDir, 'src/file-tracker.js'));
+    const { getTrackedFiles } = await import(join(__dirname, '../tools/file-tracker.js'));
     const cwd = process.cwd();
     const activeFiles = getTrackedFiles(cwd);
     

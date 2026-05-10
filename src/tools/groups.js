@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const GROUPS_DIR = '.agents';
+const GROUPS_DIR = '.agent-portal';
 const GROUPS_FILE = 'groups.json';
 const GROUPS_STATE_FILE = 'group-states.json';
 

@@ -13,7 +13,7 @@ import { writeFileSync, readFileSync, readdirSync, unlinkSync, existsSync, mkdir
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const RUNS_DIR = '.agents/runs';
+const RUNS_DIR = '.agent-portal/runs';
 
 /**
  * Write a signal file for a specific run.

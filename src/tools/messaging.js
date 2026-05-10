@@ -18,7 +18,7 @@
 import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-const MESSAGES_DIR = '.agents/messages';
+const MESSAGES_DIR = '.agent-portal/messages';
 
 /**
  * Sanitize channel name for use as filename.

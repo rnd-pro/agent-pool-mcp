@@ -1,8 +1,8 @@
 /**
  * Agent Resolver — lightweight agent entity parser for agent-pool.
  * 
- * Reads `.agents/agents/*.md` files with YAML frontmatter, resolves skill composition
- * from `.agents/skills/`, and returns ready-to-use agent definitions.
+ * Reads `.agent-portal/agents/*.md` files with YAML frontmatter, resolves skill composition
+ * from `.agent-portal/skills/`, and returns ready-to-use agent definitions.
  * 
  * Zero external dependencies. Mirrors portal's agent-parser.js logic.
  * 
@@ -142,7 +142,7 @@ const _agentCache = new Map();
 const AGENT_CACHE_TTL = 5000;
 
 /**
- * Resolve an agent by slug from `.agents/agents/{slug}.md`.
+ * Resolve an agent by slug from `.agent-portal/agents/{slug}.md`.
  * Returns the full agent definition with resolved skills prompt.
  * 
  * @param {string} cwd - Project root
@@ -156,8 +156,8 @@ export function resolveAgent(cwd, slug) {
   const cached = _agentCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts < AGENT_CACHE_TTL)) return cached.def;
 
-  const agentsDir = join(cwd, '.agents', 'agents');
-  const skillsDir = join(cwd, '.agents', 'skills');
+  const agentsDir = join(cwd, '.agent-portal', 'agents');
+  const skillsDir = join(cwd, '.agent-portal', 'skills');
   const filePath = join(agentsDir, `${slug}.md`);
 
   if (!existsSync(filePath)) {
@@ -200,7 +200,7 @@ export function resolveAgent(cwd, slug) {
  * @returns {string[]}
  */
 export function listAgentSlugs(cwd) {
-  const agentsDir = join(cwd, '.agents', 'agents');
+  const agentsDir = join(cwd, '.agent-portal', 'agents');
   if (!existsSync(agentsDir)) return [];
 
   try {

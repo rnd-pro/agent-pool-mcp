@@ -61,7 +61,7 @@ export function resolveSkills(cwd, frontmatterSkills, body) {
  */
 export function loadAgent(cwd, agentSlug) {
   const fileName = agentSlug.endsWith('.md') ? agentSlug : `${agentSlug}.md`;
-  const agentPath = path.join(cwd, '.agents', 'agents', fileName);
+  const agentPath = path.join(cwd, '.agent-portal', 'agents', fileName);
 
   if (!fs.existsSync(agentPath)) {
     throw new Error(`Agent not found: ${agentPath}`);

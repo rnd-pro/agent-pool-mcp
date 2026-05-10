@@ -48,6 +48,11 @@ function getTaskMeta(taskId) {
     error: entry.error,
     eventCount: entry.liveEvents?.length ?? 0,
     chatId: entry.chatId,
+    parentId: entry.parentId,
+    agentSlug: entry.agentSlug,
+    icon: entry.icon,
+    color: entry.color,
+    description: entry.description,
   };
 }
 
@@ -120,6 +125,10 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     pid: null,
     parentId: parentId ?? null,
     chatId: chatId ?? null,
+    agentSlug: agentSlug ?? 'unknown',
+    icon: icon || 'smart_toy',
+    color: color || '#666',
+    description: null, // set below after cleaning
     liveEvents: [],
     lastEventAt: null,
     stderr: '',
@@ -133,6 +142,7 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     boardDesc = boardDesc.substring(lastDoubleNewline + 2);
   }
   if (boardDesc.length > 120) boardDesc = boardDesc.substring(0, 120) + '…';
+  taskStore.get(taskId).description = boardDesc;
   
   getBoardStore(cwd).addNode({
     id: taskId,

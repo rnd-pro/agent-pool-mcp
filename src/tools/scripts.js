@@ -1,6 +1,6 @@
 /**
  * Scripts Database — tools for managing JIT automation scripts.
- * Agents can save and list scripts in the .agents/scripts/ directory.
+ * Agents can save and list scripts in the .agent-portal/scripts/ directory.
  *
  * @module agent-pool/tools/scripts
  */
@@ -8,7 +8,7 @@
 import { writeFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const SCRIPTS_DIR = '.agents/scripts';
+const SCRIPTS_DIR = '.agent-portal/scripts';
 
 /**
  * Get the scripts directory path for a project.

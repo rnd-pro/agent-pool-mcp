@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 
 /**
- * BoardStore - persists delegation board state (tasks/relationships) under .agents/board-state.json
+ * BoardStore - persists delegation board state (tasks/relationships) under .agent-portal/board-state.json
  * Nodes (Tasks): { id, parentId?, agentSlug, description, status, createdAt, startedAt?, completedAt?, cost?, tokens? }
  * Edges (Delegation): { id, from, to }
  */
@@ -10,7 +10,7 @@ export class BoardStore {
   constructor(workdir) {
     if (!workdir) throw new Error('BoardStore requires workdir');
     this.workdir = workdir;
-    this.file = resolve(join(workdir, '.agents', 'board-state.json'));
+    this.file = resolve(join(workdir, '.agent-portal', 'board-state.json'));
     this.state = { nodes: [], edges: [] };
     // Synchronous initialization fallback
     this.initialized = false;

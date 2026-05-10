@@ -15,9 +15,9 @@ import { nextCronRun } from './cron.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAEMON_SCRIPT = join(__dirname, 'daemon.js');
 
-const SCHEDULE_FILE = '.agents/schedule.json';
-const RESULTS_DIR = '.agents/scheduled-results';
-const PID_FILE = '.agents/scheduler.pid';
+const SCHEDULE_FILE = '.agent-portal/schedule.json';
+const RESULTS_DIR = '.agent-portal/scheduled-results';
+const PID_FILE = '.agent-portal/scheduler.pid';
 
 // ─── Schedule CRUD ──────────────────────────────────────────
 

@@ -21,7 +21,7 @@ import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, cancelTask, setNotifyCallback } from './tools/results.js';
-import { listSkills, createSkill, deleteSkill, installSkill, provisionSkill } from './tools/skills.js';
+import { listSkills, createSkill, deleteSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
 import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
@@ -30,7 +30,7 @@ import { sendMessage, getMessages } from './tools/messaging.js';
 import { saveScript, listScripts } from './tools/scripts.js';
 import { getBoardStore } from './tools/board-store.js';
 import { resolveAgent, buildAgentCatalog } from './agents/agent-resolver.js';
-import { trackFiles, untrackFiles } from '../../context-x-mcp/src/file-tracker.js';
+import { trackFiles, untrackFiles } from './tools/file-tracker.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
 
@@ -388,13 +388,13 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     // Portal-level injection: pre-resolved agent prompt
     agentContext = args.system_prompt;
   } else if (args.agent_slug) {
-    // Resolve agent from .agents/agents/{slug}.md
+    // Resolve agent from .agent-portal/agents/{slug}.md
     agentDef = resolveAgent(cwd, args.agent_slug);
     if (agentDef) {
       agentContext = agentDef.prompt;
       console.error(`[agent-pool] Resolved agent '${args.agent_slug}': ${agentDef.skills.length} skills, policy=${agentDef.policy}`);
     } else {
-      console.error(`[agent-pool] Agent '${args.agent_slug}' not found in ${cwd}/.agents/agents/`);
+      console.error(`[agent-pool] Agent '${args.agent_slug}' not found in ${cwd}/.agent-portal/agents/`);
     }
   }
 
@@ -568,43 +568,34 @@ function handleListSkills(args) {
 
 /** @param {object} args */
 function handleCreateSkill(args) {
-  const scope = args.scope ?? 'project';
-  const filePath = createSkill(args.cwd ?? defaultCwd, args.skill_name, args.description, args.instructions, scope);
+  const filePath = createSkill(args.cwd ?? defaultCwd, args.skill_name, args.description, args.instructions);
   return {
     content: [{
       type: 'text',
-      text: `✅ Skill created [${scope}]: \`${args.skill_name}\`\nPath: \`${filePath}\`\n\nUse with delegate_task: \`skill: "${args.skill_name}"\``,
+      text: `✅ Skill created: \`${args.skill_name}\`\nPath: \`${filePath}\`\n\nUse with delegate_task: \`skill: "${args.skill_name}"\``,
     }],
   };
 }
 
 /** @param {object} args */
 function handleDeleteSkill(args) {
-  const scope = args.scope ?? 'project';
-  const deleted = deleteSkill(args.cwd ?? defaultCwd, args.skill_name, scope);
+  const deleted = deleteSkill(args.cwd ?? defaultCwd, args.skill_name);
   return {
     content: [{
       type: 'text',
-      text: deleted ? `✅ Skill deleted [${scope}]: \`${args.skill_name}\`` : `❌ Skill not found [${scope}]: \`${args.skill_name}\``,
+      text: deleted ? `✅ Skill deleted: \`${args.skill_name}\`` : `❌ Skill not found: \`${args.skill_name}\``,
     }],
   };
 }
 
 /** @param {object} args */
 function handleInstallSkill(args) {
-  const result = installSkill(args.cwd ?? defaultCwd, args.skill_name);
-  if (!result) {
-    return {
-      content: [{
-        type: 'text',
-        text: `❌ Skill \`${args.skill_name}\` not found in global or built-in tiers. Use \`list_skills\` to see available skills.`,
-      }],
-    };
-  }
+  // Install from Open Memory will be handled by the portal API in the future.
+  // For now, this tool is a no-op since there are no external tiers.
   return {
     content: [{
       type: 'text',
-      text: `✅ Skill installed into project:\n- **From**: \`${result.from}\` [${result.tier}]\n- **To**: \`${result.to}\`\n\nThe skill is now a local copy — you can customize it for this project.`,
+      text: `ℹ️ Skill installation from external sources is now managed via the Agent Portal UI.\nUse \`create_skill\` to create skills directly, or install from Open Memory through the portal.`,
     }],
   };
 }
@@ -627,7 +618,7 @@ function handleScheduleTask(args) {
     return {
       content: [{
         type: 'text',
-        text: `⏰ Task scheduled.\n\n- **Schedule ID**: \`${result.scheduleId}\`\n- **Cron**: \`${args.cron}\`\n- **Next run**: ${result.nextRun || 'unknown'}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nDaemon is running in the background. Results will be saved to \`.agents/scheduled-results/\`.\nUse \`list_schedules\` to see all schedules, \`get_scheduled_results\` to read outputs.`,
+        text: `⏰ Task scheduled.\n\n- **Schedule ID**: \`${result.scheduleId}\`\n- **Cron**: \`${args.cron}\`\n- **Next run**: ${result.nextRun || 'unknown'}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nDaemon is running in the background. Results will be saved to \`.agent-portal/scheduled-results/\`.\nUse \`list_schedules\` to see all schedules, \`get_scheduled_results\` to read outputs.`,
       }],
     };
   } catch (error) {

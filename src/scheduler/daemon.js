@@ -22,9 +22,9 @@ import { killGroup } from '../runner/process-manager.js';
 import { consumeSignals, deleteSignals } from './run-signals.js';
 
 const POLL_INTERVAL_MS = 30_000; // Check schedules every 30 seconds
-const PID_FILE = '.agents/scheduler.pid';
-const SCHEDULE_FILE = '.agents/schedule.json';
-const RESULTS_DIR = '.agents/scheduled-results';
+const PID_FILE = '.agent-portal/scheduler.pid';
+const SCHEDULE_FILE = '.agent-portal/schedule.json';
+const RESULTS_DIR = '.agent-portal/scheduled-results';
 
 /** @type {string} */
 const cwd = process.argv[2] || process.cwd();
@@ -166,8 +166,8 @@ function executeSchedule(schedule) {
 
 // ─── Pipeline tick ──────────────────────────────────────────────────
 
-const PIPELINES_DIR = '.agents/pipelines';
-const RUNS_DIR = '.agents/runs';
+const PIPELINES_DIR = '.agent-portal/pipelines';
+const RUNS_DIR = '.agent-portal/runs';
 
 /**
  * In-memory pipeline state cache.
