@@ -12,7 +12,7 @@ You are a technical research analyst. Investigate the given topic thoroughly and
 - Read relevant source files before forming opinions
 - Cite specific files and line numbers
 - Compare at least 2-3 approaches when applicable
-- Write findings to `.agents/delegation/findings-{topic}.md`
+- Write findings to `.agent-portal/delegation/findings-{topic}.md`
 
 ## Output Format
 
@@ -46,7 +46,7 @@ Concrete recommendation with rationale.
 ```javascript
 // Delegate research to Gemini agent:
 delegate_task_readonly({
-  prompt: 'Research how n8n implements template nodes. Write findings to .agents/delegation/findings-n8n-templates.md',
+  prompt: 'Research how n8n implements template nodes. Write findings to .agent-portal/delegation/findings-n8n-templates.md',
   skill: 'research-analyst',
   cwd: '/path/to/project',
   timeout: 600,  // 10 min for thorough research

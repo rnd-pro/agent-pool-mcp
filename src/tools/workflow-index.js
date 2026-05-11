@@ -4,7 +4,7 @@
  *
  * Supports: strings, string arrays (both inline and multi-line), objects, booleans.
  *
- * @module context-x/workflow-index
+ * @module agent-pool/workflow-index
  */
 
 import fs from 'node:fs';

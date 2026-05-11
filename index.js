@@ -34,5 +34,12 @@ async function startServer() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('[agent-pool] MCP server v1.2.1 started');
+
+  // Exit when parent IDE closes the stdin pipe (session ended)
+  process.stdin.on('close', () => {
+    console.error('[agent-pool] stdin pipe closed, exiting');
+    process.exit(0);
+  });
+  process.on('SIGHUP', () => { process.exit(0); });
 }
 

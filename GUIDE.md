@@ -62,10 +62,10 @@ delegate_to_group({ group: "backend-team", prompt: "Refactor auth module", count
 list_groups()
 ```
 
-Groups persist to `.agents/groups.json` and survive IDE restarts.
+Groups persist to `.agent-portal/groups.json` and survive IDE restarts.
 
 ## Messaging
-Send structured data between agents or pipeline steps using `send_message` and `get_messages`. Messages are persisted as JSONL files in `.agents/messages/`.
+Send structured data between agents or pipeline steps using `send_message` and `get_messages`. Messages are persisted as JSONL files in `.agent-portal/messages/`.
 
 **Channel conventions:**
 - `{run_id}` — broadcast to all steps in a pipeline run

@@ -557,6 +557,50 @@ export function getToolDefinitions(ctx = {}) {
     },
   },
   {
+    name: 'get_tracked_files',
+    description: 'Return active files tracked in the current project context.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+    },
+  },
+  {
+    name: 'list_workflows',
+    description: 'List workflows from .agent-portal/workflows grouped by workflow directory.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+    },
+  },
+  {
+    name: 'search_by_tags',
+    description: 'Find workflow steps matching all tags. Returns full content for one match and a lightweight list for multiple matches.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to match with AND semantics.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+      required: ['tags'],
+    },
+  },
+  {
+    name: 'get_workflow_content',
+    description: 'Return markdown content and transition metadata for one workflow step node.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodeId: { type: 'string', description: 'Workflow step node id, usually the markdown filename without extension.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+      },
+      required: ['nodeId'],
+    },
+  },
+  {
     name: 'get_board_state',
     description: 'Get the current state of the Agent Board (tasks and delegation tree).',
     inputSchema: {

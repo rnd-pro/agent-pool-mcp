@@ -63,7 +63,7 @@ Schedule agents on a cron expression — a detached daemon survives IDE/CLI rest
 "0 */2 * * *"        — every 2 hours
 ```
 
-Results are saved to `.agents/scheduled-results/` and retrievable via `get_scheduled_results`.
+Results are saved to `.agent-portal/scheduled-results/` and retrievable via `get_scheduled_results`.
 
 ### 3-Tier Skill System
 
