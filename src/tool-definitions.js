@@ -196,14 +196,14 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'create_skill',
-    description: 'Create or update a CLI skill. Writes a .md file with YAML frontmatter. Use scope to control where: "project" (default) or "global" (~/.agent-portal/skills/).',
+    description: 'Create or update a project CLI skill. Writes a .md file with YAML frontmatter under .agent-portal/skills/ in the current project.',
     inputSchema: {
       type: 'object',
       properties: {
         skill_name: { type: 'string', description: 'Skill name (used as filename, e.g. "code-reviewer").' },
         description: { type: 'string', description: 'Short description of what the skill does.' },
         instructions: { type: 'string', description: 'Full markdown instructions for the skill. Define the agent role, rules, and output format.' },
-        scope: { type: 'string', description: 'Where to save: .agent-portal/skills/ in the current project.' },
+        scope: { type: 'string', enum: ['project'], description: 'Only "project" is currently supported; skills are saved under .agent-portal/skills/.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
@@ -212,12 +212,12 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'delete_skill',
-    description: 'Delete a Gemini CLI skill by name. Specify scope to target project or global tier.',
+    description: 'Delete a project CLI skill by name from .agent-portal/skills/.',
     inputSchema: {
       type: 'object',
       properties: {
         skill_name: { type: 'string', description: 'Skill name to delete.' },
-        scope: { type: 'string', enum: ['project', 'global'], description: 'Tier to delete from: "project" (default) or "global".' },
+        scope: { type: 'string', enum: ['project'], description: 'Only "project" is currently supported.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
@@ -226,7 +226,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'install_skill',
-    description: 'Install a global or built-in skill into the current project. Copies the skill file for local customization. Use list_skills to see available skills from all tiers.',
+    description: 'Reserved for future external skill installation. Project skills are managed in .agent-portal/skills/ or through the Agent Portal UI.',
     inputSchema: {
       type: 'object',
       properties: {

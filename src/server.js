@@ -421,7 +421,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     if (provisioned) {
       prompt = `IMPORTANT: Before starting the task, activate the skill "${provisioned.name}" using the activate_skill tool. Then proceed with the task.\n\n${prompt}`;
     } else {
-      prompt = `NOTE: Skill '${args.skill}' was requested but not found in any tier (project, global, built-in). Proceed with the task.\n\n${prompt}`;
+      prompt = `NOTE: Skill '${args.skill}' was requested but not found in project skills. Proceed with the task.\n\n${prompt}`;
     }
   }
 

@@ -103,7 +103,7 @@ export function listSkills(cwd) {
 }
 
 /**
- * Find a skill by name across all tiers. Lookup: project → global → built-in.
+ * Find a project skill by name.
  *
  * @param {string} cwd - Project root
  * @param {string} skillName - Skill name (with or without .md)

@@ -65,15 +65,13 @@ Schedule agents on a cron expression — a detached daemon survives IDE/CLI rest
 
 Results are saved to `.agent-portal/scheduled-results/` and retrievable via `get_scheduled_results`.
 
-### 3-Tier Skill System
+### Project Skill System
 
 Skills are Markdown files with YAML frontmatter that extend agent behavior:
 
-1. **Project** — `.gemini/skills/` (local to repo, takes precedence)
-2. **Global** — `~/.gemini/skills/` (available across all projects)
-3. **Built-in** — shipped with agent-pool (`code-reviewer`, `test-writer`, `doc-fixer`, `orchestrator`)
-
-Install a built-in or global skill into the project for local customization with `install_skill`.
+- **Project** — `.agent-portal/skills/` inside the current repo.
+- Skills are loaded recursively and re-read by agent-pool on each run.
+- Use `create_skill`, edit files directly, or manage shared skills through the Agent Portal UI.
 
 ### Per-Task Policies
 
