@@ -30,8 +30,8 @@ import { sendMessage, getMessages } from './tools/messaging.js';
 import { saveScript, listScripts } from './tools/scripts.js';
 import { getBoardStore } from './tools/board-store.js';
 import { resolveAgent, buildAgentCatalog } from './agents/agent-resolver.js';
-import { trackFiles, untrackFiles, getTrackedFiles } from './tools/file-tracker.js';
-import { buildTagIndex, searchByTags, toLightList } from './tools/workflow-index.js';
+import { trackFiles, untrackFiles } from './tools/file-tracker.js';
+import { handleGetTrackedFiles, handleListWorkflows, handleSearchByTags, handleGetWorkflowContent } from './tools/workflow-tools.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
 
@@ -327,13 +327,13 @@ export function createServer() {
         case 'untrack_files':
           response = { content: [{ type: 'text', text: `Tracked files: \n- ${untrackFiles(args.cwd || defaultCwd, args.files).join('\n- ')}` }] }; break;
         case 'get_tracked_files':
-          response = handleGetTrackedFiles(args); break;
+          response = handleGetTrackedFiles(args, defaultCwd); break;
         case 'list_workflows':
-          response = handleListWorkflows(args); break;
+          response = handleListWorkflows(args, defaultCwd); break;
         case 'search_by_tags':
-          response = handleSearchByTags(args); break;
+          response = handleSearchByTags(args, defaultCwd); break;
         case 'get_workflow_content':
-          response = handleGetWorkflowContent(args); break;
+          response = handleGetWorkflowContent(args, defaultCwd); break;
         default:
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
@@ -606,123 +606,6 @@ function handleInstallSkill(args) {
       type: 'text',
       text: `ℹ️ Skill installation from external sources is now managed via the Agent Portal UI.\nUse \`create_skill\` to create skills directly, or install from Open Memory through the portal.`,
     }],
-  };
-}
-
-/** @param {object} args */
-function getWorkflowsDir(args = {}) {
-  return path.join(args.cwd || defaultCwd, '.agent-portal', 'workflows');
-}
-
-/** @param {object} args */
-function getWorkflowIndex(args = {}) {
-  return buildTagIndex(getWorkflowsDir(args));
-}
-
-/** @param {object} args */
-function handleGetTrackedFiles(args) {
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({ tracked_files: getTrackedFiles(args.cwd || defaultCwd) }, null, 2),
-    }],
-  };
-}
-
-/** @param {object} args */
-function handleListWorkflows(args) {
-  const { nodes } = getWorkflowIndex(args);
-  const groups = new Map();
-
-  for (const node of nodes.values()) {
-    let rel = path.relative(getWorkflowsDir(args), node.filePath);
-    let parts = rel.split(path.sep);
-    let groupName = parts.length > 1 ? parts[0] : node.id;
-    if (!groups.has(groupName)) {
-      groups.set(groupName, {
-        name: groupName,
-        description: '',
-        entryPoint: null,
-        steps: [],
-      });
-    }
-    let group = groups.get(groupName);
-    group.steps.push({
-      id: node.id,
-      name: node.meta.name || node.id,
-      description: node.meta.description || '',
-      tags: node.meta.tags || [],
-      group: node.meta.group || '',
-    });
-    if (!group.entryPoint || node.meta.entryPoint === true || node.id.startsWith('01-')) {
-      group.entryPoint = node.id;
-    }
-    if (!group.description && node.meta.description) {
-      group.description = node.meta.description;
-    }
-  }
-
-  let workflows = Array.from(groups.values()).map((group) => ({
-    ...group,
-    steps: group.steps.sort((a, b) => a.id.localeCompare(b.id)),
-  })).sort((a, b) => a.name.localeCompare(b.name));
-
-  return { content: [{ type: 'text', text: JSON.stringify(workflows, null, 2) }] };
-}
-
-/** @param {object} args */
-function handleSearchByTags(args) {
-  const { nodes, tagIndex } = getWorkflowIndex(args);
-  let matched = searchByTags(nodes, tagIndex, args.tags || []);
-
-  if (matched.length === 0) {
-    return { content: [{ type: 'text', text: JSON.stringify({ matches: [] }, null, 2) }] };
-  }
-
-  if (matched.length > 1) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          action_required: 'get_workflow_content',
-          matches: toLightList(matched),
-        }, null, 2),
-      }],
-    };
-  }
-
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify(formatWorkflowNode(matched[0]), null, 2),
-    }],
-  };
-}
-
-/** @param {object} args */
-function handleGetWorkflowContent(args) {
-  const { nodes } = getWorkflowIndex(args);
-  let node = nodes.get(args.nodeId);
-  if (!node) {
-    return {
-      content: [{ type: 'text', text: `Workflow node not found: ${args.nodeId}` }],
-      isError: true,
-    };
-  }
-  return { content: [{ type: 'text', text: JSON.stringify(formatWorkflowNode(node), null, 2) }] };
-}
-
-function formatWorkflowNode(node) {
-  let transitions = node.meta.transitions || {};
-  return {
-    id: node.id,
-    name: node.meta.name || node.id,
-    description: node.meta.description || '',
-    group: node.meta.group || '',
-    tags: node.meta.tags || [],
-    transitions,
-    availableDecisions: Object.keys(transitions),
-    content: node.body,
   };
 }
 
