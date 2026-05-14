@@ -70,6 +70,8 @@ export function createPipeline(cwd, { name, steps, onError }) {
     steps: steps.map((s, i) => ({
       name: s.name,
       prompt: s.prompt || null,
+      provider: s.provider || 'codex',
+      model: s.model || null,
       contentSource: s.contentSource || s.content_source || null,
       skill: s.skill || null,
       group: s.group || null,

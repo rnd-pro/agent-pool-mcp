@@ -4,11 +4,11 @@
 
 # agent-pool-mcp
 
-Multi-agent orchestration via [Gemini CLI](https://github.com/google-gemini/gemini-cli) — parallel task delegation, sequential pipelines, cron scheduling, and cross-model peer review.
+Multi-agent orchestration via CLI providers (Codex, Gemini, OpenCode, and Claude Code) — parallel task delegation, sequential pipelines, cron scheduling, and cross-model peer review.
 
 Compatible with [Antigravity](https://antigravity.dev), Cursor, Windsurf, Claude Code, and any MCP-enabled coding agent.
 
-Your primary IDE agent delegates background tasks to Gemini CLI workers in parallel — all sharing the same authentication from a single Gemini subscription.
+Your primary IDE agent delegates background tasks to local CLI workers in parallel — each provider uses its own installed CLI authentication.
 
 When the primary agent and Gemini workers are **different foundation models** (e.g. Claude + Gemini), `consult_peer` gives you cross-model review — two models check each other's reasoning independently.
 
@@ -24,7 +24,7 @@ When the primary agent and Gemini workers are **different foundation models** (e
 └──┬─────────┬─────────┬─────────┘
    │         │         │
    ▼         ▼         ▼
-  gemini    gemini    gemini       ← Gemini CLI workers
+  codex     gemini    claude       ← CLI workers
   (task1)   (task2)   (review)       (same auth, parallel)
 ```
 
@@ -92,12 +92,14 @@ Restrict tool usage for specific tasks using YAML policies:
 
 ## Quick Start
 
-**Prerequisites:** Node.js >= 20, [Gemini CLI](https://github.com/google-gemini/gemini-cli) installed and authenticated.
+**Prerequisites:** Node.js >= 20 and at least one supported CLI installed and authenticated.
 
 ```bash
 npm install -g @google/gemini-cli
 gemini    # First run: opens browser for OAuth
 ```
+
+Claude Code tasks use `provider: "claude"` and require the `claude` CLI to be installed and authenticated.
 
 Add to your IDE's MCP configuration:
 

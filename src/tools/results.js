@@ -20,6 +20,10 @@ const TASK_TTL_MS = 10 * 60 * 1000;
 /** @type {((taskId: string, type: string, data?: object) => void)|null} */
 let _notifyCallback = null;
 
+function preview(value, limit) {
+  return typeof value === 'string' ? value.substring(0, limit) : '';
+}
+
 /**
  * Set a callback that fires on task lifecycle events (for WebSocket push).
  * @param {(taskId: string, type: string, data?: object) => void} cb
@@ -40,7 +44,7 @@ function getTaskMeta(taskId) {
   if (!entry) return null;
   return {
     status: entry.status,
-    prompt: (entry.prompt || '').substring(0, 200),
+    prompt: preview(entry.prompt, 200),
     pid: entry.pid,
     approvalMode: entry.approvalMode,
     startedAt: entry.startedAt,
@@ -50,6 +54,7 @@ function getTaskMeta(taskId) {
     chatId: entry.chatId,
     parentId: entry.parentId,
     agentSlug: entry.agentSlug,
+    resourceGroup: entry.resourceGroup,
     icon: entry.icon,
     color: entry.color,
     description: entry.description,
@@ -91,7 +96,7 @@ const COACHING_HINTS = [
   'Pro tip: batch your delegation. Send 2-3 tasks at once, then collect results when all are done.',
   'Instead of polling, make progress on your main task. Come back to check results after a few steps.',
   'While the worker handles this, consider: is there a subtask you can delegate to another worker?',
-  'Your time is valuable. Use consult_peer to validate your next architectural decision while this runs.',
+  'Your time is valuable. Use delegate_task_readonly with resource_group: "review" to validate your next architectural decision while this runs.',
   'Polling too often wastes tokens. Do meaningful work first, then check results.',
   'Is there a code review, analysis, or research task you can delegate right now?',
 ];
@@ -109,8 +114,9 @@ const COACHING_HINTS = [
  * @param {string} [chatId] - Bound chat ID for UI navigation
  * @param {string} [icon] - Material Symbols icon name for board card
  * @param {string} [color] - CSS color for board card
+ * @param {string} [resourceGroup] - Resource group used for this task
  */
-export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process.cwd(), agentSlug = 'unknown', parentId = null, chatId = null, icon = null, color = null) {
+export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process.cwd(), agentSlug = 'unknown', parentId = null, chatId = null, icon = null, color = null, resourceGroup = null) {
   taskStore.set(taskId, {
     cwd,
     status: 'running',
@@ -126,6 +132,7 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     parentId: parentId ?? null,
     chatId: chatId ?? null,
     agentSlug: agentSlug ?? 'unknown',
+    resourceGroup: resourceGroup ?? null,
     icon: icon || 'smart_toy',
     color: color || '#666',
     description: null, // set below after cleaning
@@ -346,7 +353,7 @@ export function getActiveTasks() {
     .map(([id, entry]) => {
       const elapsed = ((Date.now() - entry.startedAt) / 1000).toFixed(0);
       const pidInfo = entry.pid ? ` pid:${entry.pid}` : '';
-      return `- \`${id.substring(0, 8)}\` (${elapsed}s${pidInfo}) ${entry.prompt.substring(0, 60)}...`;
+      return `- \`${id.substring(0, 8)}\` (${elapsed}s${pidInfo}) ${preview(entry.prompt, 60)}...`;
     });
   if (active.length === 0) return null;
   return `\n\n---\n📋 **Active tasks (${active.length})**:\n${active.join('\n')}`;
@@ -368,6 +375,7 @@ export function listAllTasks() {
     runner: entry.runner,
     skill: entry.skill,
     model: entry.model,
+    resourceGroup: entry.resourceGroup,
     error: entry.error
   }));
 }
@@ -531,7 +539,7 @@ export function formatTaskResult(taskId) {
       content: [
         {
           type: 'text',
-          text: `[RUN] Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${entry.prompt.substring(0, 100)}...\n- **Mode**: ${modeLabel}\n- **PID**: ${entry.pid ?? 'unknown'}${pidStatus}${activityInfo}${stderrInfo}${progress}\n\n[INFO] **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
+          text: `[RUN] Task is still running (${elapsed}s elapsed, ${entry.liveEvents.length} events).\n\n- **Prompt**: ${preview(entry.prompt, 100)}...\n- **Mode**: ${modeLabel}\n- **PID**: ${entry.pid ?? 'unknown'}${pidStatus}${activityInfo}${stderrInfo}${progress}\n\n[INFO] **${hint}**${loadInfo}\n\nCheck again later with \`get_task_result\`.`,
         },
         {
           type: 'text',

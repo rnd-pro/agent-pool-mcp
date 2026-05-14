@@ -2,7 +2,7 @@
   "name": "agent-pool-mcp",
   "version": "1.7.3",
   "type": "module",
-  "description": "MCP Server for multi-agent task delegation and orchestration via Gemini CLI",
+  "description": "MCP Server for multi-agent task delegation and orchestration via Codex CLI",
   "main": "index.js",
   "bin": {
     "agent-pool-mcp": "index.js"
@@ -22,8 +22,8 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "gemini",
-    "gemini-cli",
+    "codex",
+    "codex-cli",
     "agent",
     "multi-agent",
     "delegation",

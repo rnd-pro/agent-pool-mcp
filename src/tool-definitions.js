@@ -51,20 +51,20 @@ export function getToolDefinitions(ctx = {}) {
   {
     name: 'delegate_task',
     description: [
-      'Delegate a coding task to a Gemini CLI agent running in headless mode.',
+      'Delegate a coding task to a CLI agent running in headless mode.',
       'The agent is sandboxed to `cwd` directory only. Use `include_dirs` to grant access to additional directories.',
       'Use this for parallel work: code review, testing, refactoring, analysis, or any dev task.',
       '',
       'Returns a task_id immediately (non-blocking). Use get_task_result to check status and retrieve the result.',
       '',
-      'IMPORTANT: Gemini CLI cold start takes ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
+      'IMPORTANT: CLI providers can take ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
       'WORKSPACE: The agent can only use file tools within `cwd` and `include_dirs`. For other paths it can use shell commands (cat, find, ls).',
     ].join('\n'),
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'The task description for the Gemini agent. Be specific and detailed.' },
-        provider: { type: 'string', enum: ['gemini', 'opencode'], description: 'CLI provider to use. gemini = Gemini CLI, opencode = OpenCode CLI. Default: gemini.' },
+        prompt: { type: 'string', description: 'The task description for the CLI agent. Be specific and detailed.' },
+        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, gemini = Gemini CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
         cwd: { type: 'string', description: 'Working directory for the agent. Defaults to current working directory.' },
         model: { type: 'string', description: modelDesc },
         approval_mode: {
@@ -73,13 +73,14 @@ export function getToolDefinitions(ctx = {}) {
           description: 'Approval mode: yolo (auto-approve all), auto_edit (auto-approve edits only), plan (read-only). Default: yolo.',
         },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
-        session_id: { type: 'string', description: 'Resume an existing Gemini CLI session by its UUID. Use list_sessions to see available sessions.' },
-        skill: { type: 'string', description: 'Activate a Gemini CLI skill by name before executing the task. Use list_skills to see available skills.' },
+        session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Gemini, Codex, OpenCode, and Claude Code where available. Use list_sessions for Gemini sessions.' },
+        skill: { type: 'string', description: 'Activate a project skill by name before executing the task. Use list_skills to see available skills.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         policy: { type: 'string', description: 'Policy file for tool restrictions. Use built-in template name (e.g. "read-only", "safe-edit") or absolute path to .yaml policy file.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results. Guides the calling agent on what to do while waiting.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd. Use this to grant access to other project dirs, config dirs, etc.' },
         agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "backend-engineer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md with composed skills. Takes priority over legacy "skill" parameter.' },
+        resource_group: { type: 'string', description: 'Resource group from .agent-portal/groups.json. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution. Used by portal for portal-level agent injection.' },
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'Chat ID to bind this task to in the UI. Optional.' },
@@ -90,29 +91,30 @@ export function getToolDefinitions(ctx = {}) {
   {
     name: 'delegate_task_readonly',
     description: [
-      'Delegate a read-only analysis task to Gemini CLI agent.',
+      'Delegate a read-only analysis task to a CLI agent.',
       'The agent is sandboxed to `cwd` directory only. Use `include_dirs` to grant access to additional directories.',
       'It is semantically identical to delegate_task but signals that the task is primarily for analysis.',
       'Use this for code review, architecture analysis, finding bugs, writing reports, etc.',
       '',
       'Returns a task_id immediately (non-blocking). Use get_task_result to check status and retrieve the result.',
       '',
-      'IMPORTANT: Gemini CLI cold start takes ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
+      'IMPORTANT: CLI providers can take ~15-20s before the agent begins working. Set timeout to at least 60s for simple tasks, 300s+ for complex analysis.',
       'WORKSPACE: The agent can only use file tools within `cwd` and `include_dirs`. For other paths it can use shell commands (cat, find, ls).',
     ].join('\n'),
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'The analysis task for the Gemini agent.' },
+        prompt: { type: 'string', description: 'The analysis task for the CLI agent.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
-        provider: { type: 'string', enum: ['gemini', 'opencode'], description: 'CLI provider to use. Default: gemini.' },
+        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, gemini = Gemini CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
         model: { type: 'string', description: modelDesc },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
-        session_id: { type: 'string', description: 'Resume an existing Gemini CLI session by its UUID. Use list_sessions to see available sessions.' },
+        session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Gemini, Codex, OpenCode, and Claude Code where available. Use list_sessions for Gemini sessions.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd.' },
         agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "code-reviewer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md.' },
+        resource_group: { type: 'string', description: 'Resource group from .agent-portal/groups.json. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution.' },
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'The chat ID created for this task via create_chat. Optional.' },
@@ -123,7 +125,8 @@ export function getToolDefinitions(ctx = {}) {
   {
     name: 'consult_peer',
     description: [
-      'Consult a Gemini peer agent for architectural/technical consensus.',
+      'Legacy Gemini-only peer consultation for architectural/technical consensus.',
+      'For Codex orchestration, prefer delegate_task_readonly with resource_group: "review".',
       'Use during PLANNING phase to validate proposals before implementation.',
       'Supports iterative rounds: send proposal, get feedback, revise, resend until AGREE.',
       'The peer responds with a structured verdict: AGREE, SUGGEST_CHANGES, or DISAGREE.',
@@ -241,7 +244,7 @@ export function getToolDefinitions(ctx = {}) {
   {
     name: 'schedule_task',
     description: [
-      'Schedule a Gemini CLI agent to run on a cron schedule or as a delayed one-shot.',
+      'Schedule a CLI agent to run on a cron schedule or as a delayed one-shot. Default provider: Codex CLI.',
       'Spawns a persistent daemon that survives IDE/CLI restarts.',
       'Results are saved to .agent-portal/scheduled-results/ and can be retrieved with get_scheduled_results.',
       '',
@@ -251,8 +254,10 @@ export function getToolDefinitions(ctx = {}) {
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'Task prompt for the Gemini agent.' },
+        prompt: { type: 'string', description: 'Task prompt for the CLI agent.' },
         cron: { type: 'string', description: 'Cron expression (5-field). E.g. "0 9 * * *" for daily at 9am.' },
+        provider: { type: 'string', enum: ['codex', 'gemini', 'claude'], description: 'CLI provider for scheduled runs. Default: codex.' },
+        model: { type: 'string', description: 'Model to use. Leave empty for provider default.' },
         cwd: { type: 'string', description: 'Working directory for the scheduled task. Defaults to current directory.' },
         skill: { type: 'string', description: 'Skill to activate for each run.' },
         approval_mode: {
@@ -316,6 +321,8 @@ export function getToolDefinitions(ctx = {}) {
             properties: {
               name: { type: 'string', description: 'Step name.' },
               prompt: { type: 'string', description: 'Step prompt.' },
+              provider: { type: 'string', enum: ['codex', 'gemini', 'claude'], description: 'CLI provider for this step. Default: codex.' },
+              model: { type: 'string', description: 'Model to use. Leave empty for provider default.' },
               trigger: { type: 'string', description: 'Trigger condition.' },
               skill: { type: 'string', description: 'Skill to use.' },
               approval_mode: { type: 'string', description: 'Approval mode.' },
@@ -422,11 +429,27 @@ export function getToolDefinitions(ctx = {}) {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Group name (e.g. "backend-team", "qa-group").' },
+        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'Default CLI provider for agents in this group. Default: codex.' },
+        model: { type: 'string', description: 'Default model for agents in this group. Use "default" for provider default.' },
+        profiles: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'] },
+              model: { type: 'string' },
+            },
+          },
+          description: 'Ordered provider/model profiles for this resource group. First profile is used by default; round_robin rotates.',
+        },
         runner: { type: 'string', description: 'Default runner for agents in this group.' },
         skill: { type: 'string', description: 'Default skill activated for all agents in this group.' },
         policy: { type: 'string', description: 'Default policy restricting agent permissions.' },
         max_agents: { type: 'number', description: 'Max concurrent agents allowed in this group.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories agents in this group can access.' },
+        fallback_profiles: { type: 'array', items: { type: 'string' }, description: 'Legacy model fallback list. Prefer profiles[].' },
+        rotation_mode: { type: 'string', enum: ['error_fallback', 'round_robin'], description: 'Profile rotation strategy. Default: error_fallback.' },
+        model_tier: { type: 'string', description: 'Logical tier label for UI/docs, e.g. fast, standard, advanced.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
@@ -457,6 +480,7 @@ export function getToolDefinitions(ctx = {}) {
       properties: {
         group: { type: 'string', description: 'Group name to delegate to.' },
         prompt: { type: 'string', description: 'Task description for the agents.' },
+        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider override for this group delegation. Default: group provider or codex.' },
         count: { type: 'number', description: 'Number of agents to spawn. Default: 1.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Overrides group default.' },

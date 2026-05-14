@@ -64,7 +64,7 @@ export function runGeminiStreaming({ prompt, cwd, model, approvalMode, timeout, 
     let hubTmpDir = null; // track for cleanup
 
     if (isRemote) {
-      let ssh = buildSshSpawn(runner, args, cwd ?? process.cwd());
+      let ssh = buildSshSpawn(runner, args, cwd ?? process.cwd(), 'gemini');
       spawnCmd = ssh.command;
       spawnArgs = ssh.args;
       spawnOpts = { stdio: ['pipe', 'pipe', 'pipe'], detached: true };

@@ -2,10 +2,10 @@
 A comprehensive, LLM-optimized guide to using agent-pool tools effectively for parallel work, pipelines, scheduling, and more.
 
 ## Delegation
-Delegate tasks to Gemini CLI workers. Use `delegate_task` for code changes, `delegate_task_readonly` for analysis. Both return task_id immediately — poll with `get_task_result`.
+Delegate tasks through resource groups. Use `delegate_task` for code changes, `delegate_task_readonly` for analysis. Both return task_id immediately — poll with `get_task_result`.
 
 **Example:**
-delegate_task({ prompt: "Add JSDoc to all functions in src/", cwd: "/project", timeout: 300 })
+delegate_task({ resource_group: "implementation", prompt: "Add JSDoc to all functions in src/", cwd: "/project", timeout: 300 })
 // Returns: { task_id: "abc-123" }
 // Check: get_task_result({ task_id: "abc-123" })
 
@@ -29,29 +29,33 @@ Skills define the agent's role and rules. Use `list_skills` to see available ski
 **Example:**
 list_skills({ cwd: "/project" })
 // Returns: ["code-reviewer", "test-writer"]
-delegate_task({ prompt: "Review PR", skill: "code-reviewer", cwd: "/project" })
+delegate_task({ resource_group: "review", prompt: "Review PR", skill: "code-reviewer", cwd: "/project" })
 
 ## Peer-Review
-Consult a peer agent for architectural or technical consensus using `consult_peer`. Supports iterative rounds of feedback.
+For Codex orchestration, consult a peer agent using `delegate_task_readonly` with `resource_group: "review"`. Ask for a structured verdict, risks, and suggested changes. `consult_peer` is a legacy Gemini-only helper; do not use it for Codex resource-group workflows.
 
 **Example:**
-consult_peer({ context: "Adding Redis cache", proposal: "Use ioredis library", cwd: "/project" })
+delegate_task_readonly({
+  resource_group: "review",
+  cwd: "/project",
+  prompt: "Context: Adding Redis cache. Proposal: Use ioredis library. Return verdict, risks, and suggested changes."
+})
 // Returns: { task_id: "peer-abc" }
 // Check: get_task_result({ task_id: "peer-abc" })
 
 ## Sessions
-Manage Gemini CLI sessions. Use `list_sessions` to find available sessions to resume with `delegate_task` via `session_id`.
+Manage provider sessions. Use `session_id` with `delegate_task` when a provider supports resuming.
 
 **Example:**
 list_sessions({ cwd: "/project" })
-delegate_task({ prompt: "Continue refactoring", session_id: "sess-xyz", cwd: "/project" })
+delegate_task({ resource_group: "implementation", prompt: "Continue refactoring", session_id: "sess-xyz", cwd: "/project" })
 
 ## Groups
 Create named agent groups with shared config. Groups are reusable presets — define runner, skill, and policy once, then delegate to the group by name. Use `count` to spawn multiple agents in parallel (fractal orchestration).
 
 **Example:**
 ```
-create_group({ name: "backend-team", runner: "remote", skill: "node-dev", policy: "safe-edit", max_agents: 3 })
+create_group({ name: "backend-team", profiles: [{ provider: "codex", model: "default" }], runner: "remote", skill: "node-dev", policy: "safe-edit", max_agents: 3 })
 create_group({ name: "qa-team", policy: "read-only", skill: "test-writer" })
 
 // Spawn 2 agents from backend-team

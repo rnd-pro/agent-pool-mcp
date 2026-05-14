@@ -147,7 +147,7 @@ const AGENT_CACHE_TTL = 5000;
  * 
  * @param {string} cwd - Project root
  * @param {string} slug - Agent name (e.g. 'backend-engineer')
- * @returns {{ slug: string, prompt: string, models: string[], policy: string, timeout: number, icon: string, color: string, description: string, role: string } | null}
+ * @returns {{ slug: string, prompt: string, resourceGroup: string, provider: string, model: string, models: string[], policy: string, timeout: number, icon: string, color: string, description: string, role: string } | null}
  */
 export function resolveAgent(cwd, slug) {
   if (!slug) return null;
@@ -178,6 +178,9 @@ export function resolveAgent(cwd, slug) {
       role: meta.role || 'executor',
       icon: meta.icon || 'smart_toy',
       color: meta.color || '#666',
+      resourceGroup: meta.resource_group || meta.resourceGroup || meta.group || null,
+      provider: meta.provider || null,
+      model: meta.model || null,
       models: Array.isArray(meta.models) ? meta.models : [],
       rotation: meta.rotation || 'on_error',
       skills: skillNames,
@@ -225,7 +228,8 @@ export function buildAgentCatalog(cwd) {
   for (const slug of slugs) {
     const def = resolveAgent(cwd, slug);
     if (def) {
-      lines.push(`- **${slug}** (${def.role}): ${def.description}`);
+      const groupInfo = def.resourceGroup ? `, group: ${def.resourceGroup}` : '';
+      lines.push(`- **${slug}** (${def.role}${groupInfo}): ${def.description}`);
     }
   }
 

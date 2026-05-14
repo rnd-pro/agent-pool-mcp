@@ -9,6 +9,14 @@ import { randomUUID } from 'node:crypto';
 import { runGeminiStreaming } from '../runner/gemini-runner.js';
 import { createTask, completeTask, failTask } from './results.js';
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function preview(value, limit) {
+  return typeof value === 'string' ? value.substring(0, limit) : '';
+}
+
 const PEER_REVIEW_SYSTEM_PROMPT = [
   'You are a senior software architect participating in a peer review session.',
   'Another AI agent (Antigravity/Claude) is proposing a technical approach.',
@@ -52,6 +60,13 @@ const PEER_REVIEW_SYSTEM_PROMPT = [
  * @returns {{content: Array<{type: string, text: string}>}}
  */
 export function consultPeer(args, defaultCwd) {
+  if (!isNonEmptyString(args?.context) || !isNonEmptyString(args?.proposal)) {
+    return {
+      content: [{ type: 'text', text: '❌ Missing required `context` or `proposal` argument for consult_peer.' }],
+      isError: true,
+    };
+  }
+
   const taskId = randomUUID();
 
   const parts = [
@@ -77,7 +92,7 @@ export function consultPeer(args, defaultCwd) {
 
   const prompt = parts.join('\n');
 
-  createTask(taskId, `[peer-review] ${args.proposal.substring(0, 100)}`, 'Peer is reviewing your proposal. Continue with other work while waiting.', 'plan');
+  createTask(taskId, `[peer-review] ${preview(args.proposal, 100)}`, 'Peer is reviewing your proposal. Continue with other work while waiting.', 'plan');
 
   runGeminiStreaming({
     prompt,
@@ -93,7 +108,7 @@ export function consultPeer(args, defaultCwd) {
   return {
     content: [{
       type: 'text',
-      text: `🤝 Peer consultation started.\n\n- **Task ID**: \`${taskId}\`\n- **Proposal**: ${args.proposal.substring(0, 120)}...\n\nUse \`get_task_result\` with this task_id to check the verdict.`,
+      text: `🤝 Peer consultation started.\n\n- **Task ID**: \`${taskId}\`\n- **Proposal**: ${preview(args.proposal, 120)}...\n\nUse \`get_task_result\` with this task_id to check the verdict.`,
     }],
   };
 }

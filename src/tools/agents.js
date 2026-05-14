@@ -70,15 +70,12 @@ export function loadAgent(cwd, agentSlug) {
   const content = fs.readFileSync(agentPath, 'utf-8');
   const { frontmatter, body } = parseFrontmatter(content);
 
-  // Apply NO FALLBACKS principle for critical LLM configuration
-  if (!frontmatter.provider) {
-    throw new Error(`Agent '${agentSlug}' is missing required field: 'provider'`);
+  // Apply NO FALLBACKS principle for orchestration resources.
+  // Agents point to a resource group; groups own concrete provider/model profiles.
+  if (!frontmatter.resource_group && !frontmatter.resourceGroup && !frontmatter.group) {
+    throw new Error(`Agent '${agentSlug}' is missing required field: 'resource_group'`);
   }
-
   const modelsArray = Array.isArray(frontmatter.models) ? frontmatter.models : [];
-  if (!frontmatter.model && modelsArray.length === 0) {
-    throw new Error(`Agent '${agentSlug}' is missing required field: 'model' or 'models[]'`);
-  }
 
   // Build the configuration object
   const agentConfig = {
@@ -86,6 +83,7 @@ export function loadAgent(cwd, agentSlug) {
     name: frontmatter.name || agentSlug.replace('.md', ''),
     description: frontmatter.description || '',
     role: frontmatter.role || 'executor',
+    resourceGroup: frontmatter.resource_group || frontmatter.resourceGroup || frontmatter.group,
     provider: frontmatter.provider,
     model: frontmatter.model,
     models: modelsArray.length > 0 ? modelsArray : undefined,

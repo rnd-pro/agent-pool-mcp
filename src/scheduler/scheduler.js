@@ -54,19 +54,23 @@ function writeSchedules(cwd, schedules) {
  * @param {object} opts
  * @param {string} opts.prompt - Task prompt
  * @param {string} opts.cron - Cron expression (5-field)
+ * @param {string} [opts.provider] - CLI provider
+ * @param {string} [opts.model] - Model ID
  * @param {string} [opts.skill] - Skill to activate
  * @param {string} [opts.approvalMode] - yolo | auto_edit | plan
  * @param {boolean} [opts.catchup] - Run missed schedules on restart
  * @param {string} [opts.taskCwd] - Working directory for the task
  * @returns {{ scheduleId: string, nextRun: string | null }}
  */
-export function addSchedule(cwd, { prompt, cron, skill, approvalMode, catchup, taskCwd }) {
+export function addSchedule(cwd, { prompt, cron, provider, model, skill, approvalMode, catchup, taskCwd }) {
   const schedules = readSchedules(cwd);
   const id = randomUUID().split('-')[0]; // short ID
   const schedule = {
     id,
     prompt,
     cron,
+    provider: provider || 'codex',
+    model: model || null,
     cwd: taskCwd || cwd,
     skill: skill || null,
     approvalMode: approvalMode || 'yolo',

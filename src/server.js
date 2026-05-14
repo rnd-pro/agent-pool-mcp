@@ -17,6 +17,8 @@ import { randomUUID } from 'node:crypto';
 
 import { runGeminiStreaming, listGeminiSessions } from './runner/gemini-runner.js';
 import { runOpencodeStreaming } from './runner/opencode-runner.js';
+import { runCodexStreaming } from './runner/codex-runner.js';
+import { runClaudeStreaming } from './runner/claude-runner.js';
 import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
@@ -25,7 +27,7 @@ import { listSkills, createSkill, deleteSkill, provisionSkill } from './tools/sk
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
 import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
-import { createGroup, listGroups, getGroup } from './tools/groups.js';
+import { createGroup, listGroups, getGroup, getGroupNextProfile } from './tools/groups.js';
 import { sendMessage, getMessages } from './tools/messaging.js';
 import { saveScript, listScripts } from './tools/scripts.js';
 import { getBoardStore } from './tools/board-store.js';
@@ -44,11 +46,22 @@ import { execFileSync, execFile } from 'node:child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const defaultCwd = process.cwd();
+const DEFAULT_PROVIDER = 'codex';
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function preview(value, limit) {
+  return typeof value === 'string' ? value.substring(0, limit) : '';
+}
 
 // ─── Prerequisite check (cached at startup) ──────────────────
 
 let geminiAvailable = null;
 let opencodeAvailable = null;
+let codexAvailable = null;
+let claudeAvailable = null;
 
 function checkGemini() {
   if (geminiAvailable !== null) return geminiAvailable;
@@ -70,6 +83,28 @@ function checkOpencode() {
     opencodeAvailable = false;
   }
   return opencodeAvailable;
+}
+
+function checkCodex() {
+  if (codexAvailable !== null) return codexAvailable;
+  try {
+    execFileSync('which', ['codex'], { encoding: 'utf-8', timeout: 2000 });
+    codexAvailable = true;
+  } catch (e) {
+    codexAvailable = false;
+  }
+  return codexAvailable;
+}
+
+function checkClaude() {
+  if (claudeAvailable !== null) return claudeAvailable;
+  try {
+    execFileSync('which', ['claude'], { encoding: 'utf-8', timeout: 2000 });
+    claudeAvailable = true;
+  } catch (e) {
+    claudeAvailable = false;
+  }
+  return claudeAvailable;
 }
 
 // ─── Dynamic model discovery (cached) ────────────────────────
@@ -132,6 +167,22 @@ Docs: https://github.com/google-gemini/gemini-cli`
   isError: true,
 };
 
+const CLAUDE_REQUIRED_ERROR = {
+  content: [{
+    type: 'text',
+    text: `❌ Claude Code CLI is not installed or not in PATH.
+
+**To fix:**
+1. Install Claude Code CLI.
+2. Authenticate: run \`claude auth login\`.
+3. Verify: \`claude --version\`.
+4. Restart your IDE to reload the MCP server.
+
+Docs: https://code.claude.com/docs/en/cli-reference`
+  }],
+  isError: true,
+};
+
 /** Tools that require Gemini CLI to be installed */
 const GEMINI_TOOLS = new Set([
   'delegate_task', 'delegate_task_readonly', 'consult_peer', 'list_sessions',
@@ -175,6 +226,8 @@ To increase the limit, set AGENT_POOL_MAX_DEPTH to a higher value.`
 export function createServer() {
   // Check gemini once at server creation
   checkGemini();
+  checkCodex();
+  checkClaude();
 
   // Async model discovery (non-blocking, populates _cachedModels for tools/list)
   discoverModels().then(m => {
@@ -235,7 +288,7 @@ export function createServer() {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+    const { name, arguments: args = {} } = request.params ?? {};
 
     // Guard: tools that require external CLI providers
     if (GEMINI_TOOLS.has(name)) {
@@ -243,13 +296,15 @@ export function createServer() {
 
       const isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(name);
       if (isDelegateTool) {
-        const provider = args.provider || (checkGemini() ? 'gemini' : (checkOpencode() ? 'opencode' : 'gemini'));
+        const provider = args.provider || null;
         if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
         if (provider === 'opencode' && !checkOpencode()) {
           return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
         }
-        // Force resolved provider into args so downstream handlers don't fallback to hardcoded gemini
-        args.provider = provider;
+        if (provider === 'codex' && !checkCodex()) {
+          return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
+        }
+        if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
       } else {
         if (!checkGemini()) return GEMINI_REQUIRED_ERROR;
       }
@@ -338,7 +393,7 @@ export function createServer() {
           response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
       }
     } catch (error) {
-      response = { content: [{ type: 'text', text: `Gemini CLI Error: ${error.message}` }], isError: true };
+      response = { content: [{ type: 'text', text: `CLI provider error: ${error.message}` }], isError: true };
     }
 
     // Append active tasks footer to every response
@@ -364,10 +419,17 @@ export function createServer() {
  * @param {string} defaults.label - Status label
  * @returns {{content: Array<{type: string, text: string}>}}
  */
-function handleDelegate(args, { approvalMode, emoji, label }) {
+function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   const config = loadConfig();
   const taskId = randomUUID();
   const cwd = args.cwd ?? defaultCwd;
+
+  if (!isNonEmptyString(args.prompt)) {
+    return {
+      content: [{ type: 'text', text: '❌ Missing required `prompt` argument for delegate_task.' }],
+      isError: true,
+    };
+  }
 
   // CWD safety — reject nonsensical workspaces
   if (config.safety.badCwdList.some(bad => cwd === bad || cwd.startsWith(bad + '/'))) {
@@ -415,6 +477,26 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     }
   }
 
+  const resourceGroupName = args.resource_group || args.resourceGroup || agentDef?.resourceGroup || null;
+  const resourceGroup = resourceGroupName ? getGroup(cwd, resourceGroupName) : null;
+  const resourceProfile = resourceGroupName && resourceGroup
+    ? getGroupNextProfile(cwd, resourceGroupName, resourceGroup)
+    : { provider: null, model: null, profile: null };
+
+  if (resourceGroupName && !resourceGroup) {
+    console.error(`[agent-pool] Resource group '${resourceGroupName}' not found in ${cwd}/.agent-portal/groups.json`);
+  }
+
+  if (resourceGroup?.max_agents) {
+    const groupActiveCount = listAllTasks().filter((t) => t.status === 'running' && t.resourceGroup === resourceGroupName).length;
+    if (groupActiveCount >= resourceGroup.max_agents) {
+      return {
+        content: [{ type: 'text', text: `⚠️ Resource group \`${resourceGroupName}\` is at capacity (${groupActiveCount}/${resourceGroup.max_agents} active tasks). Wait for an existing task in this group to complete or choose another group.` }],
+        isError: true,
+      };
+    }
+  }
+
   // Legacy skill activation (fallback when no agent_slug)
   if (!agentContext && args.skill) {
     const provisioned = provisionSkill(cwd, args.skill);
@@ -427,7 +509,9 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
 
   // Resolve policy path (built-in templates or absolute path)
   // Agent policy as default if no explicit policy
-  let policyPath = args.policy ?? (agentDef?.policy && agentDef.policy !== 'read-write' ? agentDef.policy : null);
+  let policyPath = args.policy
+    ?? (resourceGroup?.policy || null)
+    ?? (agentDef?.policy && agentDef.policy !== 'read-write' ? agentDef.policy : null);
   if (policyPath && !path.isAbsolute(policyPath)) {
     const policiesDir = path.resolve(__dirname, '..', 'policies');
     let builtinPolicy = path.resolve(policiesDir, policyPath);
@@ -469,7 +553,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   const taskOpts = {
     prompt,
     cwd,
-    model: args.model,
+    model: args.model ?? resourceProfile.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0],
     approvalMode: resolvedMode,
     timeout: args.timeout ?? config.limits.timeout,
     sessionId: args.session_id,
@@ -477,7 +561,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
     runner: args.runner,
     policy: policyPath,
     includeDirs: args.include_dirs,
-    groupConfig: args.groupConfig,
+    groupConfig: args.groupConfig || (resourceGroup ? { name: resourceGroupName, ...resourceGroup } : undefined),
     skill: args.skill,
     chat_id: args.chat_id,
   };
@@ -485,11 +569,20 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd,
     agentDef?.slug ?? args.agent_slug ?? 'unknown',
     args.parent_chat_id, args.chat_id,
-    agentDef?.icon, agentDef?.color
+    agentDef?.icon, agentDef?.color,
+    resourceGroupName
   );
 
   // Route to the correct runner based on provider
-  const provider = args.provider || 'gemini';
+  const provider = args.provider || resourceProfile.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
+  if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
+  if (provider === 'opencode' && !checkOpencode()) {
+    return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
+  }
+  if (provider === 'codex' && !checkCodex()) {
+    return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
+  }
+  if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
   let runFn;
   if (provider === 'mock') {
     runFn = async (opts) => {
@@ -503,7 +596,15 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
       return { exitCode: 0, response: 'Mock final response' };
     };
   } else {
-    runFn = provider === 'opencode' ? runOpencodeStreaming : runGeminiStreaming;
+    if (provider === 'opencode') {
+      runFn = runOpencodeStreaming;
+    } else if (provider === 'codex') {
+      runFn = runCodexStreaming;
+    } else if (provider === 'claude') {
+      runFn = runClaudeStreaming;
+    } else {
+      runFn = runGeminiStreaming;
+    }
   }
 
   runFn(taskOpts)
@@ -522,7 +623,7 @@ function handleDelegate(args, { approvalMode, emoji, label }) {
   return {
     content: [{
       type: 'text',
-      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${args.prompt.substring(0, 100)}...${loadInfo}\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${preview(args.prompt, 100)}...${loadInfo}\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
@@ -612,12 +713,27 @@ function handleInstallSkill(args) {
 // ─── Scheduler Handlers ─────────────────────────────────────────────
 
 /** @param {object} args */
-function handleScheduleTask(args) {
+function handleScheduleTask(args = {}) {
+  if (!isNonEmptyString(args.prompt)) {
+    return {
+      content: [{ type: 'text', text: '❌ Missing required `prompt` argument for schedule_task.' }],
+      isError: true,
+    };
+  }
+  if (!isNonEmptyString(args.cron)) {
+    return {
+      content: [{ type: 'text', text: '❌ Missing required `cron` argument for schedule_task.' }],
+      isError: true,
+    };
+  }
+
   const cwd = args.cwd ?? defaultCwd;
   try {
     const result = addSchedule(cwd, {
       prompt: args.prompt,
       cron: args.cron,
+      provider: args.provider || DEFAULT_PROVIDER,
+      model: args.model,
       skill: args.skill,
       approvalMode: args.approval_mode,
       catchup: args.catchup,
@@ -627,7 +743,7 @@ function handleScheduleTask(args) {
     return {
       content: [{
         type: 'text',
-        text: `⏰ Task scheduled.\n\n- **Schedule ID**: \`${result.scheduleId}\`\n- **Cron**: \`${args.cron}\`\n- **Next run**: ${result.nextRun || 'unknown'}\n- **Prompt**: ${args.prompt.substring(0, 100)}...\n\nDaemon is running in the background. Results will be saved to \`.agent-portal/scheduled-results/\`.\nUse \`list_schedules\` to see all schedules, \`get_scheduled_results\` to read outputs.`,
+        text: `⏰ Task scheduled.\n\n- **Schedule ID**: \`${result.scheduleId}\`\n- **Cron**: \`${args.cron}\`\n- **Next run**: ${result.nextRun || 'unknown'}\n- **Prompt**: ${preview(args.prompt, 100)}...\n\nDaemon is running in the background. Results will be saved to \`.agent-portal/scheduled-results/\`.\nUse \`list_schedules\` to see all schedules, \`get_scheduled_results\` to read outputs.`,
       }],
     };
   } catch (error) {
@@ -646,7 +762,7 @@ function handleListSchedules(args) {
   }
 
   const lines = schedules.map((s) =>
-    `- **${s.id}** | \`${s.cron}\` | next: ${s.nextRun || '?'} | last: ${s.lastRun || 'never'}\n  ${s.prompt.substring(0, 80)}`,
+    `- **${s.id}** | \`${s.cron}\` | next: ${s.nextRun || '?'} | last: ${s.lastRun || 'never'}\n  ${preview(s.prompt, 80)}`,
   );
 
   return {
@@ -901,14 +1017,23 @@ function handleCreateGroup(args) {
   const cwd = args.cwd ?? defaultCwd;
   const result = createGroup(cwd, {
     name: args.name,
+    provider: args.provider,
+    model: args.model,
+    profiles: args.profiles,
     runner: args.runner,
     skill: args.skill,
     policy: args.policy,
     max_agents: args.max_agents,
     include_dirs: args.include_dirs,
+    fallback_profiles: args.fallback_profiles,
+    rotation_mode: args.rotation_mode,
+    model_tier: args.model_tier,
   });
 
   const configParts = [];
+  if (args.provider) configParts.push(`provider: ${args.provider}`);
+  if (args.model) configParts.push(`model: ${args.model}`);
+  if (args.profiles?.length) configParts.push(`profiles: ${args.profiles.length}`);
   if (args.runner) configParts.push(`runner: ${args.runner}`);
   if (args.skill) configParts.push(`skill: ${args.skill}`);
   if (args.policy) configParts.push(`policy: ${args.policy}`);
@@ -934,6 +1059,9 @@ function handleListGroups(args) {
 
   const lines = groups.map((g) => {
     const parts = [];
+    if (g.provider) parts.push(`provider: ${g.provider}`);
+    if (g.model) parts.push(`model: ${g.model}`);
+    if (g.profiles?.length) parts.push(`profiles: ${g.profiles.length}`);
     if (g.runner) parts.push(`runner: ${g.runner}`);
     if (g.skill) parts.push(`skill: ${g.skill}`);
     if (g.policy) parts.push(`policy: ${g.policy}`);
@@ -974,15 +1102,19 @@ function handleDelegateToGroup(args) {
   const taskIds = [];
 
   for (let i = 0; i < count; i++) {
+    const profile = getGroupNextProfile(cwd, args.group, group);
     const delegateArgs = {
       prompt: count > 1 ? `[Agent ${i + 1}/${count} in group "${args.group}"]\n\n${args.prompt}` : args.prompt,
       cwd,
+      provider: args.provider || profile.provider || group.provider || DEFAULT_PROVIDER,
+      model: args.model || profile.model || group.model || undefined,
       runner: group.runner || undefined,
       skill: group.skill || undefined,
       policy: group.policy || undefined,
       include_dirs: group.include_dirs || undefined,
       timeout: args.timeout,
-      groupConfig: group,
+      groupConfig: { name: args.group, ...group },
+      resource_group: args.group,
     };
 
     const result = handleDelegate(delegateArgs, {

@@ -2,7 +2,7 @@
 
 /**
  * Scheduler Daemon — standalone detached process.
- * Reads schedule.json, spawns Gemini CLI agents on cron schedule.
+ * Reads schedule.json, spawns CLI agents on cron schedule.
  * Survives parent process death (MCP server, IDE, CLI).
  *
  * Usage: spawned by MCP server with detached:true + unref()
@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdir
 import { spawn, execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { matchesCron } from './cron.js';
-import { getGroup, getGroupNextModel } from '../tools/groups.js';
+import { getGroup, getGroupNextModel, getGroupNextProfile } from '../tools/groups.js';
 import { getRunner } from '../runner/config.js';
 import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
@@ -28,6 +28,78 @@ const RESULTS_DIR = '.agent-portal/scheduled-results';
 
 /** @type {string} */
 const cwd = process.argv[2] || process.cwd();
+const DEFAULT_PROVIDER = 'codex';
+
+function codexSandbox(approvalMode) {
+  return approvalMode === 'plan' ? 'read-only' : 'danger-full-access';
+}
+
+function claudePermissionMode(approvalMode) {
+  if (approvalMode === 'plan') return 'plan';
+  if (approvalMode === 'auto_edit') return 'acceptEdits';
+  return 'bypassPermissions';
+}
+
+function buildCliArgs(provider, prompt, opts = {}) {
+  const model = opts.model && opts.model !== 'default' ? opts.model : null;
+  if (provider === 'gemini') {
+    const args = [
+      '-p', prompt,
+      '--output-format', 'stream-json',
+      '--approval-mode', opts.approvalMode || 'yolo',
+    ];
+    if (model) args.push('-m', model);
+    return args;
+  }
+  if (provider === 'claude') {
+    const args = [
+      '-p', prompt,
+      '--output-format', 'stream-json',
+      '--permission-mode', claudePermissionMode(opts.approvalMode),
+    ];
+    if (model) args.push('--model', model);
+    return args;
+  }
+
+  const args = [
+    'exec',
+    '--json',
+    '-s', codexSandbox(opts.approvalMode),
+  ];
+  if (model) args.push('--model', model);
+  args.push(prompt);
+  return args;
+}
+
+function extractResponse(provider, stdout) {
+  const events = stdout.split('\n').filter(Boolean).map((line) => {
+    try { return JSON.parse(line); } catch { return null; }
+  }).filter(Boolean);
+
+  if (provider === 'codex') {
+    const messages = events
+      .filter((e) => e.type === 'item.completed' && e.item?.type === 'agent_message')
+      .map((e) => e.item.text || '')
+      .filter(Boolean);
+    return { events, response: messages.join('\n') };
+  }
+
+  if (provider === 'claude') {
+    const resultEvent = events.find((e) => e.type === 'result' && typeof e.result === 'string');
+    if (resultEvent?.result) return { events, response: resultEvent.result };
+
+    const messages = events
+      .filter((e) => e.type === 'assistant' && e.message?.content)
+      .flatMap((e) => e.message.content)
+      .filter((block) => block.type === 'text' && block.text)
+      .map((block) => block.text);
+    return { events, response: messages.join('\n') };
+  }
+
+  const messages = events.filter((e) => e.type === 'message' && e.role === 'assistant');
+  const resultEvent = events.find((e) => e.type === 'result');
+  return { events, response: resultEvent?.response || messages.map((m) => m.content || m.text || '').join('\n') };
+}
 
 // ─── PID file management ────────────────────────────────────
 
@@ -96,10 +168,10 @@ function updateSchedule(scheduleId, updates) {
   writeFileSync(join(cwd, SCHEDULE_FILE), JSON.stringify(schedules, null, 2));
 }
 
-// ─── Gemini CLI execution ───────────────────────────────────
+// ─── CLI execution ──────────────────────────────────────────
 
 /**
- * Run a Gemini CLI task and save the result.
+ * Run a CLI task and save the result.
  * @param {object} schedule
  */
 function executeSchedule(schedule) {
@@ -107,17 +179,18 @@ function executeSchedule(schedule) {
   const resultFile = join(cwd, RESULTS_DIR, `${schedule.id}_${timestamp}.json`);
   mkdirSync(join(cwd, RESULTS_DIR), { recursive: true });
 
-  const args = [
-    '-p', schedule.prompt,
-    '--output-format', 'stream-json',
-    '--approval-mode', schedule.approvalMode || 'yolo',
-  ];
+  const provider = schedule.provider || DEFAULT_PROVIDER;
+  let prompt = schedule.prompt;
   if (schedule.skill) {
     // Skills are pre-provisioned, just pass as part of prompt
-    args[1] = `Activate skill "${schedule.skill}" first.\n\n${schedule.prompt}`;
+    prompt = `Activate skill "${schedule.skill}" first.\n\n${prompt}`;
   }
+  const args = buildCliArgs(provider, prompt, {
+    approvalMode: schedule.approvalMode || 'yolo',
+    model: schedule.model,
+  });
 
-  const child = spawn('gemini', args, {
+  const child = spawn(provider, args, {
     cwd: schedule.cwd || cwd,
     env: { ...process.env, TERM: 'dumb', CI: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -130,19 +203,14 @@ function executeSchedule(schedule) {
   child.stderr.on('data', (d) => { stderr += d.toString(); });
 
   child.on('close', (code) => {
-    // Parse stream-json events for the final response
-    const events = stdout.split('\n').filter(Boolean).map((line) => {
-      try { return JSON.parse(line); } catch { return null; }
-    }).filter(Boolean);
-
-    const messages = events.filter((e) => e.type === 'message' && e.role === 'assistant');
-    const resultEvent = events.find((e) => e.type === 'result');
-    const response = resultEvent?.response || messages.map((m) => m.content || m.text || '').join('\n');
+    const { events, response } = extractResponse(provider, stdout);
 
     const result = {
       scheduleId: schedule.id,
       prompt: schedule.prompt,
       cron: schedule.cron,
+      provider,
+      model: schedule.model || null,
       executedAt: new Date(timestamp).toISOString(),
       completedAt: new Date().toISOString(),
       exitCode: code,
@@ -161,7 +229,7 @@ function executeSchedule(schedule) {
   child.unref();
 
   updateSchedule(schedule.id, { lastRun: new Date().toISOString() });
-  console.error(`[scheduler] Started: ${schedule.id} → gemini pid ${child.pid}`);
+  console.error(`[scheduler] Started: ${schedule.id} → ${provider} pid ${child.pid}`);
 }
 
 // ─── Pipeline tick ──────────────────────────────────────────────────
@@ -284,7 +352,7 @@ function applySignals(run, signals, pipeline) {
 }
 
 /**
- * Spawn Gemini CLI agent(s) for a pipeline step.
+ * Spawn CLI agent(s) for a pipeline step.
  * @param {object} stepDef - Step definition from pipeline
  * @param {object} run - Current run state
  * @param {string} runId
@@ -302,8 +370,10 @@ function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
     groupConfig = getGroup(run.cwd || cwd, stepDef.group) || {};
   }
 
+  const groupProfile = stepDef.group ? getGroupNextProfile(run.cwd || cwd, stepDef.group, groupConfig) : { provider: null, model: null };
   const skill = stepDef.skill || groupConfig.skill;
   const policy = groupConfig.policy; // currently policy only from group
+  const provider = stepDef.provider || groupProfile.provider || groupConfig.provider || DEFAULT_PROVIDER;
   const runnerId = groupConfig.runner;
   const runner = runnerId ? getRunner(runnerId) : { type: 'local' };
   const isRemote = runner && runner.type === 'ssh';
@@ -338,30 +408,29 @@ function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
     // Inject pipeline context
     prompt = `[Pipeline: ${run.pipelineName}, Step: ${stepDef.name}, Run: ${runId}]\n\nTask:\n${prompt}\n\nWhen finished, call signal_step_complete with step_name "${stepDef.name}" and run_id "${runId}".`;
 
-    const args = [
-      '-p', prompt,
-      '--output-format', 'stream-json',
-      '--approval-mode', stepDef.approvalMode || 'yolo',
-    ];
-
+    let model = stepDef.model || groupProfile.model || groupConfig.model;
     if (fallbackModel) {
-      args.push('-m', fallbackModel);
+      model = fallbackModel;
     } else if (groupConfig.rotation_mode === 'round_robin') {
       const nextModel = getGroupNextModel(run.cwd || cwd, stepDef.group);
-      if (nextModel) args.push('-m', nextModel);
+      if (nextModel) model = nextModel;
     } else if (groupConfig.fallback_profiles?.length > 0) {
       // error_fallback: start with the first model
-      args.push('-m', groupConfig.fallback_profiles[0]);
+      model = groupConfig.fallback_profiles[0];
     }
 
     if (skill) {
       // Skills can be active via prompt injection, as we do for scheduled tasks
-      args[1] = `Activate skill "${skill}" first.\n\n${args[1]}`;
+      prompt = `Activate skill "${skill}" first.\n\n${prompt}`;
     }
-    if (policy) {
+    const args = buildCliArgs(provider, prompt, {
+      approvalMode: stepDef.approvalMode || 'yolo',
+      model,
+    });
+    if (provider === 'gemini' && policy) {
       args.push('--policy', policy);
     }
-    if (groupConfig.include_dirs?.length > 0) {
+    if (provider === 'gemini' && groupConfig.include_dirs?.length > 0) {
       for (const dir of groupConfig.include_dirs) {
         args.push('--include-directories', dir);
       }
@@ -383,12 +452,12 @@ function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
       };
       if (count > 1) spawnOpts.env.AGENT_INDEX = String(i);
     } else if (isRemote) {
-      const ssh = buildSshSpawn(runner, args, run.cwd || cwd);
+      const ssh = buildSshSpawn(runner, args, run.cwd || cwd, provider);
       spawnCmd = ssh.command;
       spawnArgs = ssh.args;
       spawnOpts = { stdio: ['pipe', 'pipe', 'pipe'], detached: true };
     } else {
-      spawnCmd = 'gemini';
+      spawnCmd = provider;
       spawnArgs = args;
       const currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
       spawnOpts = {
@@ -757,4 +826,3 @@ console.error(`[scheduler] Adaptive polling: 3s active / 30s idle`);
 
 // Start the loop
 tick();
-

@@ -1,0 +1,325 @@
+import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { trackChild, killGroup, untrackChild } from './process-manager.js';
+import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
+import { loadConfig } from './config.js';
+import { createProcessWatchdog } from './timeout-manager.js';
+import { resolvePortalUrl } from './url-resolver.js';
+
+function normalizeCodexEvent(ev) {
+  if (ev.type === 'item.completed' && ev.item) {
+    let item = ev.item;
+    if (item.type === 'agent_message') {
+      let content = item.text ?? '';
+      if (!content.trim()) return null;
+      return { type: 'message', role: 'assistant', content };
+    }
+
+    if (item.type === 'command_execution') {
+      return [
+        {
+          type: 'tool_use',
+          name: 'shell',
+          parameters: { command: item.command ?? '' },
+        },
+        {
+          type: 'tool_result',
+          output: item.aggregated_output ?? '',
+          status: item.status ?? 'completed',
+        },
+      ];
+    }
+
+    if (item.type === 'file_change') {
+      let changes = item.changes ?? [];
+      return {
+        type: 'tool_use',
+        name: 'file_change',
+        parameters: { changes },
+      };
+    }
+
+    if (item.type === 'mcp_tool_call') {
+      return [
+        {
+          type: 'tool_use',
+          name: item.name ?? 'mcp_tool',
+          parameters: item.arguments ?? item.input ?? {},
+        },
+        {
+          type: 'tool_result',
+          output: item.output ?? item.result ?? '',
+          status: item.status ?? 'completed',
+        },
+      ];
+    }
+  }
+
+  if (ev.type === 'error') {
+    return {
+      type: 'error',
+      message: ev.message ?? ev.error ?? JSON.stringify(ev),
+      error: ev.message ?? ev.error ?? JSON.stringify(ev),
+    };
+  }
+
+  return null;
+}
+
+export function runCodexStreaming({ prompt, cwd, model, timeout, sessionId, taskId, chat_id }) {
+  return new Promise((resolve) => {
+    let finalPrompt = prompt;
+    try {
+      let teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
+      if (existsSync(teamRulesPath)) {
+        let rules = readFileSync(teamRulesPath, 'utf8').trim();
+        if (rules) {
+          finalPrompt = `[GLOBAL TEAM CONTEXT AND RULES]\n${rules}\n[/GLOBAL TEAM CONTEXT AND RULES]\n\nTask:\n${prompt}`;
+        }
+      }
+    } catch {
+      // Team rules are optional.
+    }
+
+    let args = sessionId
+      ? ['exec', 'resume', '--json']
+      : ['exec', '--json', '-s', 'danger-full-access'];
+
+    let effectiveModel = model && model !== 'default' ? model : null;
+    if (effectiveModel) {
+      args.push('--model', effectiveModel);
+    }
+
+    if (sessionId) {
+      args.push(sessionId);
+    }
+    args.push(finalPrompt);
+
+    let config = loadConfig();
+    let effectiveTimeout = timeout ?? config.limits.timeout;
+    let timeoutMs = effectiveTimeout * 1000;
+    let effectiveCwd = cwd ?? process.cwd();
+
+    let portalUrl = resolvePortalUrl();
+    if (portalUrl && chat_id) {
+      portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(chat_id);
+    }
+
+    let currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
+    let child = spawn('codex', args, {
+      cwd: effectiveCwd,
+      env: {
+        ...process.env,
+        TERM: 'dumb',
+        CI: '1',
+        AGENT_POOL_DEPTH: String(currentDepth + 1),
+        ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+    });
+
+    if (taskId) {
+      pushTaskEvent(taskId, {
+        type: 'message',
+        role: 'system',
+        content: '[WAIT] Spawning Codex process...',
+      });
+    }
+
+    trackChild(child.pid, taskId ?? 'streaming', 'codex-local');
+    if (taskId) setTaskPid(taskId, child.pid);
+
+    let events = [];
+    let stderrData = '';
+    let buffer = '';
+    let resolved = false;
+    let hasReceivedData = false;
+
+    let watchdog = createProcessWatchdog(timeoutMs, () => {
+      resolved = true;
+      let responseText = extractResponseText(events);
+      resolve({
+        sessionId: extractThreadId(events),
+        response: responseText || '[WAIT] Agent is still working (soft inactivity timeout reached). Partial results returned.',
+        stats: extractStats(events),
+        toolCalls: extractToolCalls(events),
+        toolResults: extractToolResults(events),
+        errors: [],
+        exitCode: null,
+        totalEvents: events.length,
+        softTimeout: true,
+        timeoutSeconds: effectiveTimeout,
+      });
+    }, config, child);
+
+    child.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
+      if (watchdog) watchdog.stop();
+
+      let errMsg = `Failed to start codex process: ${err.message}`;
+      if (taskId) pushTaskStderr(taskId, errMsg);
+
+      resolve({
+        sessionId: null,
+        response: '',
+        stats: null,
+        toolCalls: [],
+        toolResults: [],
+        errors: [errMsg],
+        exitCode: -1,
+        totalEvents: 0,
+        softTimeout: false,
+      });
+    });
+
+    child.stdout.on('data', (chunk) => {
+      if (watchdog) watchdog.kick();
+      if (!hasReceivedData && taskId) {
+        hasReceivedData = true;
+        pushTaskEvent(taskId, {
+          type: 'message',
+          role: 'system',
+          content: '✅ Connected to Codex CLI...',
+        });
+      }
+
+      buffer += chunk.toString();
+      let lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (let line of lines) {
+        let trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          let parsed = JSON.parse(trimmed);
+          events.push(parsed);
+
+          if (taskId) {
+            let normalized = normalizeCodexEvent(parsed);
+            if (normalized) {
+              if (Array.isArray(normalized)) {
+                normalized.forEach(n => pushTaskEvent(taskId, n));
+              } else {
+                pushTaskEvent(taskId, normalized);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[codex-runner] Failed to parse JSON:', trimmed, err.message);
+        }
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      if (watchdog) watchdog.kick();
+      let text = chunk.toString();
+      stderrData += text;
+      if (taskId) pushTaskStderr(taskId, text);
+    });
+
+    child.on('close', (code) => {
+      if (watchdog) watchdog.stop();
+      untrackChild(child.pid);
+
+      if (buffer.trim()) {
+        try {
+          events.push(JSON.parse(buffer.trim()));
+        } catch (err) {
+          console.error('[codex-runner] Failed to parse JSON:', buffer.trim(), err.message);
+        }
+      }
+
+      let result = {
+        sessionId: extractThreadId(events),
+        response: extractResponseText(events),
+        stats: extractStats(events),
+        toolCalls: extractToolCalls(events),
+        toolResults: extractToolResults(events),
+        errors: extractErrors(events).concat(filteredStderrErrors(stderrData)),
+        exitCode: code,
+        totalEvents: events.length,
+      };
+
+      if (resolved) {
+        if (taskId) updateTaskResult(taskId, result);
+        return;
+      }
+
+      resolved = true;
+      resolve(result);
+    });
+
+    child.stdin.end();
+  });
+}
+
+function extractResponseText(events) {
+  return events
+    .filter(e => e.type === 'item.completed' && e.item?.type === 'agent_message')
+    .map(e => e.item.text ?? '')
+    .filter(text => text && text.trim().length > 0)
+    .join('\n');
+}
+
+function extractThreadId(events) {
+  let threadEvent = events.find(e => e.type === 'thread.started');
+  return threadEvent?.thread_id ?? null;
+}
+
+function extractStats(events) {
+  let completed = events.find(e => e.type === 'turn.completed' && e.usage);
+  if (!completed) return null;
+  return {
+    tokens: {
+      input: completed.usage.input_tokens ?? 0,
+      cachedInput: completed.usage.cached_input_tokens ?? 0,
+      output: completed.usage.output_tokens ?? 0,
+      reasoning: completed.usage.reasoning_output_tokens ?? 0,
+      total: (completed.usage.input_tokens ?? 0) + (completed.usage.output_tokens ?? 0),
+    },
+  };
+}
+
+function extractToolCalls(events) {
+  return events
+    .filter(e => e.type === 'item.completed' && ['command_execution', 'mcp_tool_call', 'file_change'].includes(e.item?.type))
+    .map(e => {
+      let item = e.item;
+      if (item.type === 'command_execution') {
+        return { name: 'shell', args: { command: item.command ?? '' } };
+      }
+      if (item.type === 'file_change') {
+        return { name: 'file_change', args: { changes: item.changes ?? [] } };
+      }
+      return { name: item.name ?? 'mcp_tool', args: item.arguments ?? item.input ?? {} };
+    });
+}
+
+function extractToolResults(events) {
+  return events
+    .filter(e => e.type === 'item.completed' && ['command_execution', 'mcp_tool_call'].includes(e.item?.type))
+    .map(e => ({
+      name: e.item.type === 'command_execution' ? 'shell' : e.item.name ?? 'mcp_tool',
+      output: (e.item.aggregated_output ?? e.item.output ?? e.item.result ?? '').toString().substring(0, 500),
+    }));
+}
+
+function extractErrors(events) {
+  return events
+    .filter(e => e.type === 'error')
+    .map(e => e.message ?? e.error ?? JSON.stringify(e));
+}
+
+function filteredStderrErrors(stderrData) {
+  if (!stderrData) return [];
+  let filtered = stderrData
+    .split('\n')
+    .filter(line => line.trim() !== 'Reading additional input from stdin...')
+    .join('\n')
+    .trim();
+  return filtered ? [filtered] : [];
+}

@@ -24,16 +24,17 @@ export function escapeShellArg(arg) {
  * @param {object} runner - Runner config
  * @param {string} runner.host - SSH host
  * @param {string} [runner.cwd] - Remote working directory
- * @param {string[]} geminiArgs - Gemini CLI arguments
+ * @param {string[]} cliArgs - CLI arguments
  * @param {string} localCwd - Local cwd (fallback for remote)
+ * @param {string} [provider] - CLI provider binary
  * @returns {{command: string, args: string[]}}
  */
-export function buildSshSpawn(runner, geminiArgs, localCwd) {
+export function buildSshSpawn(runner, cliArgs, localCwd, provider = 'gemini') {
   const remoteCwd = runner.cwd ?? localCwd;
 
   // Build safe remote command with PID echo
-  const safeArgs = geminiArgs.map(escapeShellArg).join(' ');
-  const remoteCmd = `cd ${escapeShellArg(remoteCwd)} && echo "REMOTE_PID:$$" && exec gemini ${safeArgs}`;
+  const safeArgs = cliArgs.map(escapeShellArg).join(' ');
+  const remoteCmd = `cd ${escapeShellArg(remoteCwd)} && echo "REMOTE_PID:$$" && exec ${escapeShellArg(provider)} ${safeArgs}`;
 
   return {
     command: 'ssh',

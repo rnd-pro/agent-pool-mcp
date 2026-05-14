@@ -1,11 +1,11 @@
 ---
 name: orchestrator
-description: Enables hierarchical task delegation — the agent can decompose complex tasks and delegate sub-tasks to its own Gemini CLI workers via agent-pool.
+description: Enables hierarchical task delegation — the agent can decompose complex tasks and delegate sub-tasks to Codex CLI workers via agent-pool.
 ---
 
 # Orchestrator
 
-You are a task orchestrator. Break down complex tasks into smaller sub-tasks and delegate them in parallel using `delegate_task` and `consult_peer`.
+You are a task orchestrator. Break down complex tasks into smaller sub-tasks and delegate them in parallel using `delegate_task` and `delegate_task_readonly`.
 
 ## When to Orchestrate
 
@@ -41,24 +41,28 @@ Expected output:
 
 ```javascript
 // Phase 1: Parallel research
-delegate_task_readonly({ prompt: "Analyze module A..." })  // → task_1
-delegate_task_readonly({ prompt: "Analyze module B..." })  // → task_2
-delegate_task_readonly({ prompt: "Analyze module C..." })  // → task_3
+delegate_task_readonly({ resource_group: "review", prompt: "Analyze module A..." })  // → task_1
+delegate_task_readonly({ resource_group: "review", prompt: "Analyze module B..." })  // → task_2
+delegate_task_readonly({ resource_group: "review", prompt: "Analyze module C..." })  // → task_3
 
 // Phase 2: Collect results
 get_task_result(task_1)
 get_task_result(task_2)
 get_task_result(task_3)
 
-// Phase 3: Plan based on findings
-consult_peer({ proposal: "Based on analysis..." })
+// Phase 3: Plan based on findings.
+// For Codex orchestration, peer review is a readonly delegated task.
+delegate_task_readonly({
+  resource_group: "review",
+  prompt: "Review this proposal and return verdict, risks, and suggested changes: Based on analysis..."
+})
 
 // Phase 4: Parallel implementation
-delegate_task({ prompt: "Refactor module A..." })  // → task_4
-delegate_task({ prompt: "Refactor module B..." })  // → task_5
+delegate_task({ resource_group: "implementation", prompt: "Refactor module A..." })  // → task_4
+delegate_task({ resource_group: "implementation", prompt: "Refactor module B..." })  // → task_5
 
 // Phase 5: Verify
-delegate_task_readonly({ prompt: "Run tests and verify..." })
+delegate_task_readonly({ resource_group: "verification", prompt: "Run tests and verify..." })
 ```
 
 ## Resource Awareness
@@ -75,6 +79,7 @@ delegate_task_readonly({ prompt: "Run tests and verify..." })
 - **Respect file ownership** — no two sub-tasks edit the same file
 - **Provide enough context** — sub-tasks are stateless
 - **Verify after delegation** — check that sub-task output is correct
+- **Use Codex resource groups** — use `delegate_task_readonly({ resource_group: "review", ... })` for peer review; `consult_peer` is legacy Gemini-only.
 
 ## Post-Workflow Reflection (Self-Learning)
 

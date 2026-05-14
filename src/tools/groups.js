@@ -1,6 +1,7 @@
 /**
  * Agent Groups — named config presets for fractal orchestration.
- * Groups bundle runner, skill, policy, and max_agents into a reusable team config.
+ * Groups bundle provider/model profiles, runner, skill, policy, and max_agents
+ * into a reusable team config.
  *
  * @module agent-pool/tools/groups
  */
@@ -98,6 +99,9 @@ function saveGroups(cwd, groups) {
  * @param {string} cwd - Project directory
  * @param {object} config - Group configuration
  * @param {string} config.name - Group name (e.g. "backend-team")
+ * @param {string} [config.provider] - Default CLI provider for agents in this group
+ * @param {string} [config.model] - Default model for agents in this group
+ * @param {Array<{provider?: string, model?: string}>} [config.profiles] - Provider/model profiles
  * @param {string} [config.runner] - Default runner for agents in this group
  * @param {string} [config.skill] - Default skill for agents in this group
  * @param {string} [config.policy] - Default policy for agents in this group
@@ -113,6 +117,9 @@ export function createGroup(cwd, config) {
   const existed = !!groups[config.name];
 
   groups[config.name] = {
+    provider: config.provider || 'codex',
+    model: config.model || null,
+    profiles: Array.isArray(config.profiles) ? config.profiles : [],
     runner: config.runner || null,
     skill: config.skill || null,
     policy: config.policy || null,
@@ -133,7 +140,7 @@ export function createGroup(cwd, config) {
  * List all groups.
  *
  * @param {string} cwd - Project directory
- * @returns {Array<{ name: string, runner: string|null, skill: string|null, policy: string|null, max_agents: number|null }>}
+ * @returns {Array<{ name: string, provider: string|null, model: string|null, profiles: Array<object>, runner: string|null, skill: string|null, policy: string|null, max_agents: number|null }>}
  */
 export function listGroups(cwd) {
   const groups = loadGroups(cwd);
@@ -203,4 +210,52 @@ export function getGroupNextModel(cwd, name) {
 
   // error_fallback or default: always return the first model initially
   return profiles[0];
+}
+
+/**
+ * Resolve the active provider/model profile for a group.
+ * Supports the new `profiles[]` shape and the legacy `fallback_profiles[]`
+ * model list used by OpenCode/Gemini flows.
+ *
+ * @param {string} cwd - Project directory
+ * @param {string} name - Group name
+ * @param {object|null} [groupOverride] - Already-loaded group config
+ * @returns {{ provider: string|null, model: string|null, profile: object|null }}
+ */
+export function getGroupNextProfile(cwd, name, groupOverride = null) {
+  const group = groupOverride || getGroup(cwd, name);
+  if (!group) return { provider: null, model: null, profile: null };
+
+  const profiles = Array.isArray(group.profiles) && group.profiles.length > 0
+    ? group.profiles
+    : [];
+
+  if (profiles.length > 0) {
+    let profile;
+    if (group.rotation_mode === 'round_robin') {
+      const states = loadGroupStates(cwd);
+      if (!states[name]) {
+        states[name] = { currentIndex: 0 };
+      }
+      const index = states[name].currentIndex % profiles.length;
+      profile = profiles[index];
+      states[name].currentIndex = (index + 1) % profiles.length;
+      saveGroupStates(cwd, states);
+    } else {
+      profile = profiles[0];
+    }
+
+    return {
+      provider: profile.provider || group.provider || 'codex',
+      model: profile.model || group.model || null,
+      profile,
+    };
+  }
+
+  const legacyModel = getGroupNextModel(cwd, name);
+  return {
+    provider: group.provider || 'codex',
+    model: legacyModel || group.model || null,
+    profile: legacyModel ? { provider: group.provider || 'codex', model: legacyModel } : null,
+  };
 }

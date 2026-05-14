@@ -6,6 +6,7 @@
 // temp config directories and point providers to them via env vars:
 //   - Gemini CLI: GEMINI_CLI_HOME → temp dir with settings.json
 //   - OpenCode: OPENCODE_HOME → temp dir with config
+//   - Claude Code: --mcp-config → temp JSON file with config
 //
 // Pattern: create temp → set env → cleanup temp on exit
 
@@ -84,6 +85,69 @@ export function createOpenCodeEnv(portalUrl) {
     envOverrides: {
       OPENCODE_HOME: tmpDir,
     },
+  };
+}
+
+/**
+ * Create an isolated Claude Code MCP config with portal URL.
+ * Claude Code loads explicit config files with --mcp-config.
+ *
+ * @param {string} portalUrl - Portal MCP URL
+ * @returns {{ configPath: string, tmpDir: string }}
+ */
+export function createClaudeMcpConfig(portalUrl) {
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-hub-'));
+  let configPath = path.join(tmpDir, 'mcp.json');
+
+  let config = {
+    mcpServers: {
+      'agent-portal': {
+        type: 'http',
+        url: portalUrl,
+      },
+    },
+  };
+
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+  return { configPath, tmpDir };
+}
+
+function readPortalConfig() {
+  let configPath = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
+  if (!fs.existsSync(configPath)) return {};
+  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch { return {}; }
+}
+
+function toAnthropicBaseUrl(portalUrl) {
+  try {
+    let url = new URL(portalUrl);
+    url.search = '';
+    url.hash = '';
+    url.pathname = '/anthropic';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build Claude Code gateway env overrides when portal anthropicGateway is enabled.
+ * @param {string|null} portalUrl - Portal MCP URL
+ * @returns {object}
+ */
+export function getClaudeGatewayEnv(portalUrl) {
+  let config = readPortalConfig();
+  let gateway = config.anthropicGateway || config.settings?.anthropicGateway || null;
+  if (!gateway?.enabled) return {};
+
+  let baseUrl = gateway.baseUrl || (portalUrl ? toAnthropicBaseUrl(portalUrl) : null);
+  if (!baseUrl) return {};
+
+  return {
+    ANTHROPIC_BASE_URL: baseUrl,
+    ANTHROPIC_AUTH_TOKEN: gateway.authToken || process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN || 'portal-local',
+    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
   };
 }
 
