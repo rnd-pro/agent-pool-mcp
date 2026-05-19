@@ -30,7 +30,7 @@ import { homedir } from 'node:os';
  * @property {number} hardTimeoutMultiplier - Hard timeout = timeout × this (default: 2)
  * @property {number} hardTimeoutMax - Hard timeout cap in seconds (default: 1800)
  * @property {number} maxSteps - Max agent steps per task before kill (default: 50)
- * @property {number} maxConcurrent - Max concurrent agent processes (default: 5)
+ * @property {number} maxConcurrent - Max concurrent agent processes. Use 0 to disable the global cap.
  * @property {number} maxDepth - Max orchestration depth (default: 3)
  */
 
@@ -66,7 +66,7 @@ const DEFAULTS = {
     hardTimeoutMultiplier: 2,
     hardTimeoutMax: 1800,
     maxSteps: 50,
-    maxConcurrent: 5,
+    maxConcurrent: 0,
     maxDepth: 3,
   },
   safety: {
@@ -158,4 +158,3 @@ export function getRunner(runnerId) {
 export function resetConfig() {
   cachedConfig = null;
 }
-

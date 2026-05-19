@@ -23,7 +23,7 @@ import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, cancelTask, setNotifyCallback } from './tools/results.js';
-import { listSkills, createSkill, deleteSkill, provisionSkill } from './tools/skills.js';
+import { listSkills, getSkillContent, createSkill, deleteSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
 import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
@@ -34,6 +34,7 @@ import { getBoardStore } from './tools/board-store.js';
 import { resolveAgent, buildAgentCatalog } from './agents/agent-resolver.js';
 import { trackFiles, untrackFiles } from './tools/file-tracker.js';
 import { handleGetTrackedFiles, handleListWorkflows, handleSearchByTags, handleGetWorkflowContent } from './tools/workflow-tools.js';
+import { handleResolveContext } from './tools/context-resolver.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
 
@@ -54,6 +55,34 @@ function isNonEmptyString(value) {
 
 function preview(value, limit) {
   return typeof value === 'string' ? value.substring(0, limit) : '';
+}
+
+function isBlockedWorkspacePath(config, dir) {
+  let resolved = path.resolve(dir);
+  return config.safety.badCwdList.some((bad) => resolved === bad || resolved.startsWith(bad + path.sep));
+}
+
+function resolveWorkspaceDirs(config, cwd, includeDirs = []) {
+  let resolvedCwd = path.resolve(cwd);
+  if (isBlockedWorkspacePath(config, resolvedCwd)) {
+    return {
+      error: `❌ Refusing to delegate: cwd="${resolvedCwd}" looks like a system directory, not a project workspace. Please provide an explicit cwd pointing to your project.`,
+    };
+  }
+
+  let dirs = [resolvedCwd];
+  for (let dir of includeDirs) {
+    if (!isNonEmptyString(dir)) continue;
+    let resolved = path.resolve(resolvedCwd, dir);
+    if (isBlockedWorkspacePath(config, resolved)) {
+      return {
+        error: `❌ Refusing to delegate: include_dirs contains "${resolved}", which looks like a system directory.`,
+      };
+    }
+    dirs.push(resolved);
+  }
+
+  return { cwd: resolvedCwd, dirs };
 }
 
 // ─── Prerequisite check (cached at startup) ──────────────────
@@ -202,6 +231,24 @@ function getMaxDepth() {
   return loadConfig().limits.maxDepth;
 }
 
+function resolveDelegateProviderForGuard(toolName, args = {}) {
+  if (args.provider) return args.provider;
+  if (toolName === 'delegate_to_group' && args.group) {
+    let cwd = args.cwd ?? defaultCwd;
+    let group = getGroup(cwd, args.group);
+    let firstProfile = Array.isArray(group?.profiles) ? group.profiles[0] : null;
+    return firstProfile?.provider || group?.provider || DEFAULT_PROVIDER;
+  }
+  return DEFAULT_PROVIDER;
+}
+
+function requiresDepthBlock(toolName, args = {}) {
+  if (!isDepthExceeded()) return false;
+  let isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(toolName);
+  if (!isDelegateTool) return true;
+  return resolveDelegateProviderForGuard(toolName, args) === 'gemini';
+}
+
 
 const DEPTH_EXCEEDED_ERROR = {
   content: [{
@@ -232,10 +279,15 @@ export function createServer() {
   // Async model discovery (non-blocking, populates _cachedModels for tools/list)
   discoverModels().then(m => {
     if (m.length > 0) console.error(`[agent-pool] Discovered ${m.length} models for tool schema`);
-  }).catch(() => {});
+  }).catch((err) => {
+    console.error(`[agent-pool] Model discovery failed: ${err.message}`);
+    _cachedModels = [];
+  });
 
   // Non-blocking history rotation
-  runHistoryCleanup().catch(() => {});
+  runHistoryCleanup().catch((err) => {
+    console.error(`[agent-pool] History cleanup failed: ${err.message}`);
+  });
 
   if (CURRENT_DEPTH > 0) {
     console.error(`[agent-pool] Nested orchestration: depth=${CURRENT_DEPTH}, max=${getMaxDepth()}`);
@@ -292,7 +344,7 @@ export function createServer() {
 
     // Guard: tools that require external CLI providers
     if (GEMINI_TOOLS.has(name)) {
-      if (isDepthExceeded()) return DEPTH_EXCEEDED_ERROR;
+      if (requiresDepthBlock(name, args)) return DEPTH_EXCEEDED_ERROR;
 
       const isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(name);
       if (isDelegateTool) {
@@ -331,6 +383,10 @@ export function createServer() {
           response = await handleListSessions(args); break;
         case 'list_skills':
           response = handleListSkills(args); break;
+        case 'get_skill_content':
+          response = handleGetSkillContent(args); break;
+        case 'resolve_context':
+          response = handleResolveContext(args, defaultCwd); break;
         case 'create_skill':
           response = handleCreateSkill(args); break;
         case 'delete_skill':
@@ -361,8 +417,6 @@ export function createServer() {
           response = handleSignalStepComplete(args); break;
         case 'bounce_back':
           response = handleBounceBack(args); break;
-        case 'get_usage_guide':
-          response = handleGetUsageGuide(args); break;
         case 'create_group':
           response = handleCreateGroup(args); break;
         case 'list_groups':
@@ -422,7 +476,14 @@ export function createServer() {
 function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   const config = loadConfig();
   const taskId = randomUUID();
-  const cwd = args.cwd ?? defaultCwd;
+  const scope = resolveWorkspaceDirs(config, args.cwd ?? defaultCwd, args.include_dirs);
+  if (scope.error) {
+    return {
+      content: [{ type: 'text', text: scope.error }],
+      isError: true,
+    };
+  }
+  const cwd = scope.cwd;
 
   if (!isNonEmptyString(args.prompt)) {
     return {
@@ -431,17 +492,9 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     };
   }
 
-  // CWD safety — reject nonsensical workspaces
-  if (config.safety.badCwdList.some(bad => cwd === bad || cwd.startsWith(bad + '/'))) {
-    return {
-      content: [{ type: 'text', text: `❌ Refusing to delegate: cwd="${cwd}" looks like a system directory, not a project workspace. Please provide an explicit cwd pointing to your project.` }],
-      isError: true,
-    };
-  }
-
   // Concurrency limit
   const activeCount = listAllTasks().filter(t => t.status === 'running').length;
-  if (activeCount >= config.limits.maxConcurrent) {
+  if (config.limits.maxConcurrent > 0 && activeCount >= config.limits.maxConcurrent) {
     return {
       content: [{ type: 'text', text: `⚠️ Concurrency limit reached (${activeCount}/${config.limits.maxConcurrent} active tasks). Wait for existing tasks to complete or cancel them first.` }],
       isError: true,
@@ -532,14 +585,13 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     auto_edit: 'AUTO-EDIT — you can read files and edit code, but shell commands require approval.',
     plan: 'READ-ONLY — you can only read files and analyze code. You CANNOT write files or run destructive commands.',
   };
-  const resolvedMode = args.approval_mode ?? approvalMode;
+  const resolvedMode = args.approval_mode ?? agentDef?.approvalMode ?? approvalMode;
   const modeNotice = roleDescriptions[resolvedMode] ?? `Mode: ${resolvedMode}`;
+  const minTimeout = resolvedMode === 'plan' ? 300 : 60;
+  const timeout = Math.max(args.timeout ?? config.limits.timeout, minTimeout);
 
   // Build workspace scope awareness — tell the agent its sandbox boundaries upfront
-  const workspaceDirs = [cwd];
-  if (args.include_dirs?.length > 0) {
-    workspaceDirs.push(...args.include_dirs);
-  }
+  const workspaceDirs = scope.dirs;
   const scopeNotice = `[Workspace Scope] You have access to these directories:\n${workspaceDirs.map((d) => `  - ${d}`).join('\n')}\nIf you need files outside these paths, use shell commands (cat, find, ls) instead of file tools. Do NOT attempt list_directory or read_file on paths outside your workspace — they will be rejected by the sandbox.`;
 
   // Assemble final prompt: mode → scope → agent context → user task
@@ -555,7 +607,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     cwd,
     model: args.model ?? resourceProfile.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0],
     approvalMode: resolvedMode,
-    timeout: args.timeout ?? config.limits.timeout,
+    timeout,
     sessionId: args.session_id,
     taskId,
     runner: args.runner,
@@ -566,15 +618,9 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     chat_id: args.chat_id,
   };
 
-  createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd,
-    agentDef?.slug ?? args.agent_slug ?? 'unknown',
-    args.parent_chat_id, args.chat_id,
-    agentDef?.icon, agentDef?.color,
-    resourceGroupName
-  );
-
   // Route to the correct runner based on provider
   const provider = args.provider || resourceProfile.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
+  if (isDepthExceeded() && provider === 'gemini') return DEPTH_EXCEEDED_ERROR;
   if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
   if (provider === 'opencode' && !checkOpencode()) {
     return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
@@ -583,6 +629,21 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
   }
   if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
+
+  createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd,
+    agentDef?.slug ?? args.agent_slug ?? 'unknown',
+    args.parent_chat_id, args.chat_id,
+    agentDef?.icon, agentDef?.color,
+    resourceGroupName,
+    {
+      provider,
+      model: taskOpts.model ?? null,
+      runner: args.runner ?? null,
+      skill: args.skill ?? null,
+      sessionId: args.session_id ?? null,
+    }
+  );
+
   let runFn;
   if (provider === 'mock') {
     runFn = async (opts) => {
@@ -674,6 +735,21 @@ function handleListSkills(args) {
   return {
     content: [{ type: 'text', text: `## Available Skills (${skills.length})\n\n${lines.join('\n')}` }],
   };
+}
+
+/** @param {object} args */
+function handleGetSkillContent(args) {
+  const skillName = args.name || args.skill_name || args.skill;
+  if (!skillName) {
+    return { content: [{ type: 'text', text: 'Missing skill name. Use `name`.' }], isError: true };
+  }
+
+  const skill = getSkillContent(args.cwd ?? defaultCwd, skillName);
+  if (!skill) {
+    return { content: [{ type: 'text', text: `Skill not found: ${skillName}` }], isError: true };
+  }
+
+  return { content: [{ type: 'text', text: JSON.stringify(skill, null, 2) }] };
 }
 
 /** @param {object} args */
@@ -1108,10 +1184,17 @@ function handleDelegateToGroup(args) {
       cwd,
       provider: args.provider || profile.provider || group.provider || DEFAULT_PROVIDER,
       model: args.model || profile.model || group.model || undefined,
+      approval_mode: args.approval_mode,
+      agent_slug: args.agent_slug,
+      system_prompt: args.system_prompt,
+      chat_id: args.chat_id,
+      parent_chat_id: args.parent_chat_id,
+      session_id: args.session_id,
+      on_wait_hint: args.on_wait_hint,
       runner: group.runner || undefined,
       skill: group.skill || undefined,
       policy: group.policy || undefined,
-      include_dirs: group.include_dirs || undefined,
+      include_dirs: args.include_dirs || group.include_dirs || undefined,
       timeout: args.timeout,
       groupConfig: { name: args.group, ...group },
       resource_group: args.group,

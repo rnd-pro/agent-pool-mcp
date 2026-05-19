@@ -10,7 +10,31 @@
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseMarkdownFrontmatter } from '../tools/frontmatter.js';
+
+const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+
+function getAgentRootCandidates(cwd) {
+  const candidates = [
+    process.env.AGENT_PORTAL_MEMORY_ROOT,
+    process.env.AGENT_PORTAL_AGENTS_ROOT,
+    cwd,
+    process.cwd(),
+    MODULE_ROOT,
+  ].filter(Boolean).map(root => resolve(root));
+  return [...new Set(candidates)];
+}
+
+function resolveAgentRoot(cwd, slug = null) {
+  for (const root of getAgentRootCandidates(cwd)) {
+    const agentsDir = join(root, '.agent-portal', 'agents');
+    if (slug && existsSync(join(agentsDir, `${slug}.md`))) return root;
+    if (!slug && existsSync(agentsDir)) return root;
+  }
+  return resolve(cwd || process.cwd());
+}
 
 // ─── Frontmatter Parser ────────────────────────────────────
 
@@ -20,53 +44,8 @@ import { join, basename } from 'node:path';
  * @returns {{ meta: object, body: string }}
  */
 function parseFrontmatter(raw) {
-  let match = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!match) return { meta: {}, body: raw.trim() };
-
-  let yamlBlock = match[1];
-  let body = match[2].trim();
-  let meta = {};
-  let currentKey = null;
-  let isArray = false;
-
-  for (let line of yamlBlock.split('\n')) {
-    let trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    if (trimmed.startsWith('- ') && currentKey && isArray) {
-      meta[currentKey].push(trimmed.slice(2).trim());
-      continue;
-    }
-
-    let kvMatch = trimmed.match(/^(\w+):\s*(.*)$/);
-    if (kvMatch) {
-      let key = kvMatch[1];
-      let val = kvMatch[2].trim();
-
-      if (val === '') {
-        meta[key] = [];
-        currentKey = key;
-        isArray = true;
-      } else if (val.startsWith('[') && val.endsWith(']')) {
-        meta[key] = val.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
-        currentKey = key;
-        isArray = false;
-      } else {
-        if (val === 'true') val = true;
-        else if (val === 'false') val = false;
-        else if (/^\d+$/.test(val)) val = parseInt(val, 10);
-        else if (/^\d+\.\d+$/.test(val)) val = parseFloat(val);
-        else if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
-        }
-        meta[key] = val;
-        currentKey = key;
-        isArray = false;
-      }
-    }
-  }
-
-  return { meta, body };
+  let parsed = parseMarkdownFrontmatter(raw);
+  return parsed ? { meta: parsed.meta, body: parsed.body } : { meta: {}, body: raw.trim() };
 }
 
 // ─── Skill Resolution ───────────────────────────────────────
@@ -135,6 +114,63 @@ function resolveSkills(body, skillNames, skillsDir) {
   return parts.join('\n\n---\n\n');
 }
 
+function approvalModeFromMeta(meta) {
+  const explicit = meta.approval_mode || meta.approvalMode || meta.access_mode || meta.accessMode;
+  if (explicit) return explicit;
+  if (meta.policy === 'read-only') return 'plan';
+  if (meta.policy === 'admin') return 'yolo';
+  if (meta.policy === 'read-write') return 'auto_edit';
+  return null;
+}
+
+function arrayFromMeta(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Resolve only agent routing/access metadata without assembling its prompt.
+ *
+ * Dynamic context planning must not load fixed agent instructions or frontmatter
+ * skills. Those belong to the static agent layer and are assembled only when the
+ * concrete agent is actually launched.
+ *
+ * @param {string} cwd - Project root
+ * @param {string} slug - Agent name (e.g. 'backend-engineer')
+ * @returns {{ slug: string, description: string, role: string, resourceGroup: string|null, provider: string|null, model: string|null, models: string[], policy: string, approvalMode: string|null, contextTags: string[] } | null}
+ */
+export function resolveAgentMetadata(cwd, slug) {
+  if (!slug) return null;
+
+  const agentRoot = resolveAgentRoot(cwd, slug);
+  const agentsDir = join(agentRoot, '.agent-portal', 'agents');
+  const filePath = join(agentsDir, `${slug}.md`);
+
+  if (!existsSync(filePath)) {
+    console.error(`[agent-resolver] Agent '${slug}' not found in any .agent-portal/agents root for cwd=${cwd}`);
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(filePath, 'utf8');
+    const { meta } = parseFrontmatter(raw);
+    return {
+      slug: meta.name || slug,
+      description: meta.description || '',
+      role: meta.role || 'executor',
+      resourceGroup: meta.resource_group || meta.resourceGroup || meta.group || null,
+      provider: meta.provider || null,
+      model: meta.model || null,
+      models: arrayFromMeta(meta.models),
+      policy: meta.policy || 'read-write',
+      approvalMode: approvalModeFromMeta(meta),
+      contextTags: arrayFromMeta(meta.context_tags || meta.contextTags),
+    };
+  } catch (err) {
+    console.error(`[agent-resolver] Failed to parse agent metadata '${slug}':`, err.message);
+    return null;
+  }
+}
+
 // ─── Agent Resolution ───────────────────────────────────────
 
 /** @type {Map<string, { def: object, ts: number }>} */
@@ -152,16 +188,17 @@ const AGENT_CACHE_TTL = 5000;
 export function resolveAgent(cwd, slug) {
   if (!slug) return null;
 
-  const cacheKey = `${cwd}:${slug}`;
+  const agentRoot = resolveAgentRoot(cwd, slug);
+  const cacheKey = `${agentRoot}:${slug}`;
   const cached = _agentCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts < AGENT_CACHE_TTL)) return cached.def;
 
-  const agentsDir = join(cwd, '.agent-portal', 'agents');
-  const skillsDir = join(cwd, '.agent-portal', 'skills');
+  const agentsDir = join(agentRoot, '.agent-portal', 'agents');
+  const skillsDir = join(agentRoot, '.agent-portal', 'skills');
   const filePath = join(agentsDir, `${slug}.md`);
 
   if (!existsSync(filePath)) {
-    console.error(`[agent-resolver] Agent file not found: ${filePath}`);
+    console.error(`[agent-resolver] Agent '${slug}' not found in any .agent-portal/agents root for cwd=${cwd}`);
     return null;
   }
 
@@ -181,10 +218,11 @@ export function resolveAgent(cwd, slug) {
       resourceGroup: meta.resource_group || meta.resourceGroup || meta.group || null,
       provider: meta.provider || null,
       model: meta.model || null,
-      models: Array.isArray(meta.models) ? meta.models : [],
+      models: arrayFromMeta(meta.models),
       rotation: meta.rotation || 'on_error',
       skills: skillNames,
       policy: meta.policy || 'read-write',
+      approvalMode: approvalModeFromMeta(meta),
       timeout: meta.timeout || 600,
       prompt,
     };
@@ -203,7 +241,8 @@ export function resolveAgent(cwd, slug) {
  * @returns {string[]}
  */
 export function listAgentSlugs(cwd) {
-  const agentsDir = join(cwd, '.agent-portal', 'agents');
+  const agentRoot = resolveAgentRoot(cwd);
+  const agentsDir = join(agentRoot, '.agent-portal', 'agents');
   if (!existsSync(agentsDir)) return [];
 
   try {

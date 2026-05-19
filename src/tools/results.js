@@ -55,6 +55,11 @@ function getTaskMeta(taskId) {
     parentId: entry.parentId,
     agentSlug: entry.agentSlug,
     resourceGroup: entry.resourceGroup,
+    provider: entry.provider,
+    model: entry.model,
+    runner: entry.runner,
+    skill: entry.skill,
+    sessionId: entry.sessionId,
     icon: entry.icon,
     color: entry.color,
     description: entry.description,
@@ -71,7 +76,8 @@ function getTaskMeta(taskId) {
 function classifyError(errorText) {
   const lower = errorText.toLowerCase();
 
-  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('quota') || lower.includes('resource_exhausted')) {
+  if (lower.includes('429') || lower.includes('too many requests') || lower.includes('rate limit') ||
+      lower.includes('quota') || lower.includes('resource_exhausted') || lower.includes('resource exhausted')) {
     return '🔄 **Rate limited.** Wait 30-60 seconds, then retry the same task with `delegate_task`.';
   }
   if (lower.includes('network') || lower.includes('econnrefused') || lower.includes('econnreset') || lower.includes('etimedout') || lower.includes('fetch failed') || lower.includes('socket hang up')) {
@@ -115,8 +121,9 @@ const COACHING_HINTS = [
  * @param {string} [icon] - Material Symbols icon name for board card
  * @param {string} [color] - CSS color for board card
  * @param {string} [resourceGroup] - Resource group used for this task
+ * @param {object} [metadata] - Additional routing metadata for inspection/resume
  */
-export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process.cwd(), agentSlug = 'unknown', parentId = null, chatId = null, icon = null, color = null, resourceGroup = null) {
+export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process.cwd(), agentSlug = 'unknown', parentId = null, chatId = null, icon = null, color = null, resourceGroup = null, metadata = {}) {
   taskStore.set(taskId, {
     cwd,
     status: 'running',
@@ -133,6 +140,11 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     chatId: chatId ?? null,
     agentSlug: agentSlug ?? 'unknown',
     resourceGroup: resourceGroup ?? null,
+    provider: metadata.provider ?? null,
+    model: metadata.model ?? null,
+    runner: metadata.runner ?? null,
+    skill: metadata.skill ?? null,
+    sessionId: metadata.sessionId ?? null,
     icon: icon || 'smart_toy',
     color: color || '#666',
     description: null, // set below after cleaning
@@ -230,6 +242,7 @@ export function completeTask(taskId, result) {
     entry.result = result;
     entry.completedAt = Date.now();
     entry.pid = null;
+    if (result?.sessionId) entry.sessionId = result.sessionId;
     
     const cost = result?.stats?.cost;
     const tokens = result?.stats?.tokens?.total || result?.stats?.total_tokens;
@@ -248,9 +261,22 @@ export function completeTask(taskId, result) {
  */
 export function updateTaskResult(taskId, result) {
   const entry = taskStore.get(taskId);
+  if (!entry) {
+    console.error(`[agent-pool] Late task result dropped because task was already cleaned up: ${taskId}`);
+    return;
+  }
+
   if (entry && entry.status === 'done' && entry.result?.softTimeout) {
     entry.result = result;
+    entry.completedAt = Date.now();
     entry.pid = null;
+    if (result?.sessionId) entry.sessionId = result.sessionId;
+
+    const cost = result?.stats?.cost;
+    const tokens = result?.stats?.tokens?.total || result?.stats?.total_tokens;
+    getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'done', completedAt: new Date().toISOString(), cost, tokens });
+
+    if (_notifyCallback) _notifyCallback(taskId, 'done', { ...result, meta: getTaskMeta(taskId) });
   }
 }
 
@@ -370,11 +396,17 @@ export function listAllTasks() {
     status: entry.status,
     prompt: entry.prompt,
     pid: entry.pid,
+    chatId: entry.chatId,
+    parentId: entry.parentId,
+    agentSlug: entry.agentSlug,
     startedAt: entry.startedAt,
+    completedAt: entry.completedAt,
     elapsedMs: Date.now() - entry.startedAt,
     runner: entry.runner,
     skill: entry.skill,
     model: entry.model,
+    provider: entry.provider,
+    sessionId: entry.sessionId,
     resourceGroup: entry.resourceGroup,
     error: entry.error
   }));
@@ -482,7 +514,7 @@ export function formatTaskResult(taskId) {
       const raw = entry.stderr;
 
       // Count rate limit occurrences
-      const rateLimitCount = (raw.match(/429|Too Many Requests|RESOURCE_EXHAUSTED/gi) || []).length;
+      const rateLimitCount = (raw.match(/429|Too Many Requests|RESOURCE[_ ]EXHAUSTED/gi) || []).length;
 
       // Forward-compatible: extract retry delay if present in stderr.
       // Currently Google SDK does NOT include retryDelayMs in console.error output,
@@ -550,7 +582,6 @@ export function formatTaskResult(taskId) {
   }
 
   if (entry.status === 'cancelled') {
-    removeTask(taskId);
     return {
       content: [{ type: 'text', text: `🛑 Task was cancelled.` }],
     };
@@ -559,7 +590,6 @@ export function formatTaskResult(taskId) {
   if (entry.status === 'error') {
     const errorText = entry.error ?? 'Unknown error';
     const retryHint = classifyError(errorText);
-    removeTask(taskId);
     return {
       content: [{ type: 'text', text: `❌ Task failed: ${errorText}\n\n${retryHint}` }],
       isError: true,
@@ -568,10 +598,6 @@ export function formatTaskResult(taskId) {
 
   // Done — format result
   const result = entry.result;
-  // Don't remove soft-timeout tasks — process is still running, updateTaskResult will update later
-  if (!result.softTimeout) {
-    removeTask(taskId);
-  }
 
   const sections = [];
 
@@ -595,7 +621,7 @@ export function formatTaskResult(taskId) {
     }
     // Include stderr diagnostics (rate limits, etc.)
     if (entry.stderr) {
-      const rateLimitCount = (entry.stderr.match(/429|Too Many Requests|RESOURCE_EXHAUSTED/gi) || []).length;
+      const rateLimitCount = (entry.stderr.match(/429|Too Many Requests|RESOURCE[_ ]EXHAUSTED/gi) || []).length;
       if (rateLimitCount > 0) {
         sections.push(`### Cause: Rate Limit\n\n⚡ **${rateLimitCount} rate limit errors (429)** during execution. Task failed because API quota was exhausted.\n\n💡 Wait a few minutes for quota to reset, then retry.`);
       } else {
@@ -624,6 +650,10 @@ export function formatTaskResult(taskId) {
   const statParts = [];
   if (entry.approvalMode) statParts.push(`- Mode: ${entry.approvalMode}`);
   if (result.sessionId) statParts.push(`- Session ID: \`${result.sessionId}\``);
+  if (entry.provider) statParts.push(`- Provider: ${entry.provider}`);
+  if (entry.model) statParts.push(`- Model: ${entry.model}`);
+  if (entry.resourceGroup) statParts.push(`- Resource group: ${entry.resourceGroup}`);
+  if (entry.chatId) statParts.push(`- Chat ID: \`${entry.chatId}\``);
   if (result.stats) {
     const s = result.stats;
     const models = Object.keys(s.models ?? {});
@@ -653,6 +683,7 @@ export function formatTaskResult(taskId) {
 setInterval(() => {
   const now = Date.now();
   for (const [taskId, entry] of taskStore) {
+    if (entry.result?.softTimeout && entry.pid) continue;
     if (entry.status !== 'running' && entry.completedAt && (now - entry.completedAt) > TASK_TTL_MS) {
       taskStore.delete(taskId);
     }

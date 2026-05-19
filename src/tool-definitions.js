@@ -148,7 +148,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'get_task_result',
-    description: 'Check the status and result of a background task started with delegate_task, delegate_task_readonly, or consult_peer. Returns status: running, done, or error.',
+    description: 'Check the status and result of a background task started with delegate_task, delegate_task_readonly, or consult_peer. Completed results remain available until TTL cleanup, so multiple callers can retrieve the full report.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -187,6 +187,23 @@ export function getToolDefinitions(ctx = {}) {
     },
   },
   {
+    name: 'resolve_context',
+    description: 'Return a compact dynamic context plan for a task. Classifies zones, recommends tool profile, and returns matching skill/workflow indexes without loading full markdown.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Task or prompt to classify.' },
+        prompt: { type: 'string', description: 'Alias for task.' },
+        agent_slug: { type: 'string', description: 'Optional agent role slug whose metadata should influence context selection.' },
+        files: { type: 'array', items: { type: 'string' }, description: 'Known relevant file paths for higher-confidence zone matching.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        mode: { type: 'string', enum: ['plan', 'items', 'both'], description: 'Return shape. plan = compact plan, items = atomic load list, both = plan plus items. Default: plan.' },
+        max_skills: { type: 'number', description: 'Maximum skill index entries to return. Default: 8.' },
+        max_workflows: { type: 'number', description: 'Maximum workflow index entries to return. Default: 8.' },
+      },
+    },
+  },
+  {
     name: 'list_skills',
     description: 'List available CLI skills from the project .agent-portal/skills/ directory. Skills are markdown files with YAML frontmatter.',
     inputSchema: {
@@ -194,6 +211,18 @@ export function getToolDefinitions(ctx = {}) {
       properties: {
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
+      },
+    },
+  },
+  {
+    name: 'get_skill_content',
+    description: 'Return one project skill with metadata and markdown content. Use after resolve_context returns a skill item that needs atomic loading.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Skill name returned by list_skills or resolve_context items.' },
+        skill_name: { type: 'string', description: 'Alias for name.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
       },
     },
   },
@@ -481,6 +510,14 @@ export function getToolDefinitions(ctx = {}) {
         group: { type: 'string', description: 'Group name to delegate to.' },
         prompt: { type: 'string', description: 'Task description for the agents.' },
         provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider override for this group delegation. Default: group provider or codex.' },
+        model: { type: 'string', description: 'Model override for this group delegation. Default: group profile/model.' },
+        approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode override passed to child tasks.' },
+        agent_slug: { type: 'string', description: 'Agent role slug passed to child tasks.' },
+        chat_id: { type: 'string', description: 'Existing chat ID to bind child tasks to.' },
+        parent_chat_id: { type: 'string', description: 'Parent chat ID used to create/bind child task chats.' },
+        session_id: { type: 'string', description: 'Provider session/thread ID passed through for resumed tasks.' },
+        include_dirs: { type: 'array', items: { type: 'string' }, description: 'Scope directories override for child tasks. Default: group include_dirs.' },
+        on_wait_hint: { type: 'string', description: 'Optional wait hint shown while the task runs.' },
         count: { type: 'number', description: 'Number of agents to spawn. Default: 1.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Overrides group default.' },
