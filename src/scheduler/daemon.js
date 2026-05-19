@@ -20,24 +20,49 @@ import { getRunner } from '../runner/config.js';
 import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
 import { consumeSignals, deleteSignals } from './run-signals.js';
+import { getClaudeGatewayEnv } from '../runner/provider-config.js';
+import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
 
 const POLL_INTERVAL_MS = 30_000; // Check schedules every 30 seconds
-const PID_FILE = '.agent-portal/scheduler.pid';
-const SCHEDULE_FILE = '.agent-portal/schedule.json';
-const RESULTS_DIR = '.agent-portal/scheduled-results';
+const PID_FILE = 'scheduler.pid';
+const SCHEDULE_FILE = 'schedule.json';
+const RESULTS_DIR = 'scheduled-results';
 
 /** @type {string} */
 const cwd = process.argv[2] || process.cwd();
 const DEFAULT_PROVIDER = 'codex';
 
+function schedulePath() {
+  const localPath = getProjectStatePath(cwd, SCHEDULE_FILE);
+  return existsSync(localPath) ? localPath : getLegacyAgentPortalPath(cwd, SCHEDULE_FILE);
+}
+
+function writeSchedulePath() {
+  return getProjectStatePath(cwd, SCHEDULE_FILE);
+}
+
+function resultsDir() {
+  return getProjectStatePath(cwd, RESULTS_DIR);
+}
+
+function pidPath() {
+  return getProjectStatePath(cwd, PID_FILE);
+}
+
 function codexSandbox(approvalMode) {
-  return approvalMode === 'plan' ? 'read-only' : 'danger-full-access';
+  if (approvalMode === 'plan') return 'read-only';
+  if (approvalMode === 'auto_edit') return 'workspace-write';
+  return 'danger-full-access';
 }
 
 function claudePermissionMode(approvalMode) {
   if (approvalMode === 'plan') return 'plan';
   if (approvalMode === 'auto_edit') return 'acceptEdits';
   return 'bypassPermissions';
+}
+
+function providerGatewayEnv(provider) {
+  return provider === 'claude' ? getClaudeGatewayEnv(null) : {};
 }
 
 function buildCliArgs(provider, prompt, opts = {}) {
@@ -55,6 +80,7 @@ function buildCliArgs(provider, prompt, opts = {}) {
     const args = [
       '-p', prompt,
       '--output-format', 'stream-json',
+      '--verbose',
       '--permission-mode', claudePermissionMode(opts.approvalMode),
     ];
     if (model) args.push('--model', model);
@@ -107,10 +133,10 @@ function extractResponse(provider, stdout) {
  * Write PID file. Exit if another daemon is already running.
  */
 function acquireLock() {
-  const pidPath = join(cwd, PID_FILE);
-  if (existsSync(pidPath)) {
+  const filePath = pidPath();
+  if (existsSync(filePath)) {
     try {
-      const existingPid = parseInt(readFileSync(pidPath, 'utf-8').trim());
+      const existingPid = parseInt(readFileSync(filePath, 'utf-8').trim());
       // Check if process is still alive
       process.kill(existingPid, 0);
       // Process exists — exit, another daemon is running
@@ -120,8 +146,8 @@ function acquireLock() {
       // Process dead — stale PID file, we can take over
     }
   }
-  mkdirSync(dirname(pidPath), { recursive: true });
-  writeFileSync(pidPath, String(process.pid));
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, String(process.pid));
 }
 
 /**
@@ -129,11 +155,11 @@ function acquireLock() {
  */
 function releaseLock() {
   try {
-    const pidPath = join(cwd, PID_FILE);
-    if (existsSync(pidPath)) {
-      const storedPid = readFileSync(pidPath, 'utf-8').trim();
+    const filePath = pidPath();
+    if (existsSync(filePath)) {
+      const storedPid = readFileSync(filePath, 'utf-8').trim();
       if (storedPid === String(process.pid)) {
-        unlinkSync(pidPath);
+        unlinkSync(filePath);
       }
     }
   } catch { /* ignore */ }
@@ -146,7 +172,7 @@ function releaseLock() {
  * @returns {Array<{id: string, prompt: string, cron: string, cwd: string, skill?: string, approvalMode?: string, catchup?: boolean, lastRun?: string, createdAt: string}>}
  */
 function readSchedules() {
-  const filePath = join(cwd, SCHEDULE_FILE);
+  const filePath = schedulePath();
   if (!existsSync(filePath)) return [];
   try {
     return JSON.parse(readFileSync(filePath, 'utf-8'));
@@ -165,7 +191,9 @@ function updateSchedule(scheduleId, updates) {
   const idx = schedules.findIndex((s) => s.id === scheduleId);
   if (idx === -1) return;
   Object.assign(schedules[idx], updates);
-  writeFileSync(join(cwd, SCHEDULE_FILE), JSON.stringify(schedules, null, 2));
+  const filePath = writeSchedulePath();
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, JSON.stringify(schedules, null, 2));
 }
 
 // ─── CLI execution ──────────────────────────────────────────
@@ -176,8 +204,9 @@ function updateSchedule(scheduleId, updates) {
  */
 function executeSchedule(schedule) {
   const timestamp = Date.now();
-  const resultFile = join(cwd, RESULTS_DIR, `${schedule.id}_${timestamp}.json`);
-  mkdirSync(join(cwd, RESULTS_DIR), { recursive: true });
+  const dir = resultsDir();
+  const resultFile = join(dir, `${schedule.id}_${timestamp}.json`);
+  mkdirSync(dir, { recursive: true });
 
   const provider = schedule.provider || DEFAULT_PROVIDER;
   let prompt = schedule.prompt;
@@ -192,7 +221,7 @@ function executeSchedule(schedule) {
 
   const child = spawn(provider, args, {
     cwd: schedule.cwd || cwd,
-    env: { ...process.env, TERM: 'dumb', CI: '1' },
+    env: { ...process.env, TERM: 'dumb', CI: '1', ...providerGatewayEnv(provider) },
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: true,
   });
@@ -235,7 +264,11 @@ function executeSchedule(schedule) {
 // ─── Pipeline tick ──────────────────────────────────────────────────
 
 const PIPELINES_DIR = '.agent-portal/pipelines';
-const RUNS_DIR = '.agent-portal/runs';
+const RUNS_DIR = 'runs';
+
+function runsDir() {
+  return getProjectStatePath(cwd, RUNS_DIR);
+}
 
 /**
  * In-memory pipeline state cache.
@@ -250,7 +283,7 @@ const runCache = new Map();
  * Called once on daemon startup.
  */
 function loadRunCache() {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir();
   if (!existsSync(dir)) return;
   for (const f of readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('.signal-'))) {
     try {
@@ -269,7 +302,7 @@ function loadRunCache() {
  * @param {object} run
  */
 function persistRun(runId, run) {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir();
   mkdirSync(dir, { recursive: true });
   const target = join(dir, `${runId}.json`);
   const tmp = join(dir, `${runId}.json.tmp`);
@@ -466,7 +499,8 @@ function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
           ...process.env,
           TERM: 'dumb',
           CI: '1',
-          AGENT_POOL_DEPTH: String(currentDepth + 1)
+          AGENT_POOL_DEPTH: String(currentDepth + 1),
+          ...providerGatewayEnv(provider),
         },
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
@@ -519,13 +553,13 @@ function isAlive(pid) {
  */
 function tickPipelines() {
   // Pick up new runs added to disk since last tick (e.g., from runPipeline)
-  const runsDir = join(cwd, RUNS_DIR);
-  if (existsSync(runsDir)) {
-    for (const f of readdirSync(runsDir).filter(f => f.endsWith('.json') && !f.includes('.signal-') && !f.endsWith('.tmp'))) {
+  const runStateDir = runsDir();
+  if (existsSync(runStateDir)) {
+    for (const f of readdirSync(runStateDir).filter(f => f.endsWith('.json') && !f.includes('.signal-') && !f.endsWith('.tmp'))) {
       const runId = f.replace('.json', '');
       if (!runCache.has(runId)) {
         try {
-          const run = JSON.parse(readFileSync(join(runsDir, f), 'utf-8'));
+          const run = JSON.parse(readFileSync(join(runStateDir, f), 'utf-8'));
           runCache.set(runId, run);
           console.error(`[pipeline] Picked up new run: ${runId}`);
         } catch { /* skip corrupted */ }
@@ -769,8 +803,8 @@ function tick() {
   if (schedules.length === 0 && !hasActivePipeline) {
     // No work — check for pipeline definitions before exiting
     const pipelinesDir = join(cwd, PIPELINES_DIR);
-    const runsDir = join(cwd, RUNS_DIR);
-    const hasRuns = existsSync(runsDir) && readdirSync(runsDir).some(f => f.endsWith('.json'));
+    const runStateDir = runsDir();
+    const hasRuns = existsSync(runStateDir) && readdirSync(runStateDir).some(f => f.endsWith('.json'));
     if (!hasRuns) {
       console.error('[scheduler] No schedules or active pipelines. Daemon exiting.');
       releaseLock();

@@ -1,8 +1,9 @@
 import fs from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { dirname } from 'node:path';
+import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
 
 /**
- * BoardStore - persists delegation board state (tasks/relationships) under .agent-portal/board-state.json
+ * BoardStore - persists delegation board state (tasks/relationships) in local portal project state.
  * Nodes (Tasks): { id, parentId?, agentSlug, description, status, createdAt, startedAt?, completedAt?, cost?, tokens? }
  * Edges (Delegation): { id, from, to }
  */
@@ -10,14 +11,16 @@ export class BoardStore {
   constructor(workdir) {
     if (!workdir) throw new Error('BoardStore requires workdir');
     this.workdir = workdir;
-    this.file = resolve(join(workdir, '.agent-portal', 'board-state.json'));
+    this.file = getProjectStatePath(workdir, 'board-state.json');
+    this.legacyFile = getLegacyAgentPortalPath(workdir, 'board-state.json');
     this.state = { nodes: [], edges: [] };
     this.initialized = false;
   }
 
   load() {
     try {
-      const buf = fs.readFileSync(this.file, 'utf8');
+      const source = fs.existsSync(this.file) ? this.file : this.legacyFile;
+      const buf = fs.readFileSync(source, 'utf8');
       const j = JSON.parse(buf);
       if (j && typeof j === 'object') {
         this.state = {

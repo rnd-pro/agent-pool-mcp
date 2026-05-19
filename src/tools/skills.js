@@ -46,7 +46,7 @@ function getProjectSkillsDir(cwd) {
  *
  * @param {string} dir - Skills directory
  * @param {string} tier - Tier label: 'project', 'global', 'built-in'
- * @returns {Array<{fileName: string, name: string, description: string, category: string, tier: string, filePath: string}>}
+ * @returns {Array<{fileName: string, name: string, description: string, category: string, tags: string[], appliesTo: object|null, tokenCost: string|null, autoload: boolean|null, tier: string, filePath: string}>}
  */
 function readSkillsFromDir(dir, tier) {
   if (!fs.existsSync(dir)) return [];
@@ -79,6 +79,10 @@ function readSkillsFromDir(dir, tier) {
       name: frontmatter.name || fileName.replace('.md', ''),
       description: frontmatter.description || '(no description)',
       category: frontmatter.category || frontmatter.group || fallbackCategory,
+      tags: Array.isArray(frontmatter.tags) ? frontmatter.tags : [],
+      appliesTo: frontmatter.applies_to || frontmatter.appliesTo || null,
+      tokenCost: frontmatter.token_cost || frontmatter.tokenCost || null,
+      autoload: typeof frontmatter.autoload === 'boolean' ? frontmatter.autoload : null,
       tier,
       filePath,
     };
@@ -90,7 +94,7 @@ function readSkillsFromDir(dir, tier) {
  * Sorted by category then name.
  *
  * @param {string} cwd - Project root
- * @returns {Array<{fileName: string, name: string, description: string, category: string, tier: string, filePath: string}>}
+ * @returns {Array<{fileName: string, name: string, description: string, category: string, tags: string[], appliesTo: object|null, tokenCost: string|null, autoload: boolean|null, tier: string, filePath: string}>}
  */
 export function listSkills(cwd) {
   const project = readSkillsFromDir(getProjectSkillsDir(cwd), 'project');
@@ -122,6 +126,32 @@ export function findSkill(cwd, skillName) {
     };
   }
   return null;
+}
+
+/**
+ * Return one skill with metadata and markdown body.
+ *
+ * @param {string} cwd - Project root
+ * @param {string} skillName - Skill name (with or without .md)
+ * @returns {{ name: string, description: string, category: string, tags: string[], tokenCost: string|null, autoload: boolean|null, tier: string, fileName: string, content: string } | null}
+ */
+export function getSkillContent(cwd, skillName) {
+  const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
+  const all = listSkills(cwd);
+  const match = all.find(s => s.name === targetName || s.fileName === skillName);
+  if (!match) return null;
+
+  return {
+    name: match.name,
+    description: match.description,
+    category: match.category,
+    tags: match.tags || [],
+    tokenCost: match.tokenCost || null,
+    autoload: match.autoload,
+    tier: match.tier,
+    fileName: match.fileName,
+    content: fs.readFileSync(match.filePath, 'utf-8'),
+  };
 }
 
 /**

@@ -68,7 +68,13 @@ function normalizeCodexEvent(ev) {
   return null;
 }
 
-export function runCodexStreaming({ prompt, cwd, model, timeout, sessionId, taskId, chat_id }) {
+function sandboxMode(approvalMode) {
+  if (approvalMode === 'plan') return 'read-only';
+  if (approvalMode === 'auto_edit') return 'workspace-write';
+  return 'danger-full-access';
+}
+
+export function runCodexStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, chat_id }) {
   return new Promise((resolve) => {
     let finalPrompt = prompt;
     try {
@@ -85,7 +91,7 @@ export function runCodexStreaming({ prompt, cwd, model, timeout, sessionId, task
 
     let args = sessionId
       ? ['exec', 'resume', '--json']
-      : ['exec', '--json', '-s', 'danger-full-access'];
+      : ['exec', '--json', '-s', sandboxMode(approvalMode)];
 
     let effectiveModel = model && model !== 'default' ? model : null;
     if (effectiveModel) {

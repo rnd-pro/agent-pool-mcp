@@ -80,7 +80,7 @@ export function getToolDefinitions(ctx = {}) {
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results. Guides the calling agent on what to do while waiting.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd. Use this to grant access to other project dirs, config dirs, etc.' },
         agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "backend-engineer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md with composed skills. Takes priority over legacy "skill" parameter.' },
-        resource_group: { type: 'string', description: 'Resource group from .agent-portal/groups.json. Overrides the agent frontmatter resource_group.' },
+        resource_group: { type: 'string', description: 'Resource group from local portal configuration. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution. Used by portal for portal-level agent injection.' },
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'Chat ID to bind this task to in the UI. Optional.' },
@@ -114,7 +114,7 @@ export function getToolDefinitions(ctx = {}) {
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd.' },
         agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "code-reviewer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md.' },
-        resource_group: { type: 'string', description: 'Resource group from .agent-portal/groups.json. Overrides the agent frontmatter resource_group.' },
+        resource_group: { type: 'string', description: 'Resource group from local portal configuration. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution.' },
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'The chat ID created for this task via create_chat. Optional.' },
@@ -275,7 +275,7 @@ export function getToolDefinitions(ctx = {}) {
     description: [
       'Schedule a CLI agent to run on a cron schedule or as a delayed one-shot. Default provider: Codex CLI.',
       'Spawns a persistent daemon that survives IDE/CLI restarts.',
-      'Results are saved to .agent-portal/scheduled-results/ and can be retrieved with get_scheduled_results.',
+      'Results are saved in local portal project state and can be retrieved with get_scheduled_results.',
       '',
       'Cron format: standard 5-field (minute hour day month weekday).',
       'Examples: "*/30 * * * *" (every 30 min), "0 9 * * MON-FRI" (9am weekdays), "0 */2 * * *" (every 2 hours).',
@@ -596,7 +596,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'track_files',
-    description: 'Track active files in the current project context (.agent-portal/active_context.json). Useful to persist file context between pipeline steps.',
+    description: 'Track active files in local portal project state. Useful to persist file context between pipeline steps.',
     inputSchema: {
       type: 'object',
       properties: {

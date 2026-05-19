@@ -66,7 +66,7 @@ export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, 
       // Team rules are optional.
     }
 
-    let args = ['-p', finalPrompt, '--output-format', 'stream-json', '--permission-mode', permissionMode(approvalMode)];
+    let args = ['-p', finalPrompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode(approvalMode)];
 
     let effectiveModel = model && model !== 'default' ? model : null;
     if (effectiveModel) args.push('--model', effectiveModel);

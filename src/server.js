@@ -537,7 +537,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     : { provider: null, model: null, profile: null };
 
   if (resourceGroupName && !resourceGroup) {
-    console.error(`[agent-pool] Resource group '${resourceGroupName}' not found in ${cwd}/.agent-portal/groups.json`);
+    console.error(`[agent-pool] Resource group '${resourceGroupName}' not found in local portal resource groups`);
   }
 
   if (resourceGroup?.max_agents) {
@@ -819,7 +819,7 @@ function handleScheduleTask(args = {}) {
     return {
       content: [{
         type: 'text',
-        text: `⏰ Task scheduled.\n\n- **Schedule ID**: \`${result.scheduleId}\`\n- **Cron**: \`${args.cron}\`\n- **Next run**: ${result.nextRun || 'unknown'}\n- **Prompt**: ${preview(args.prompt, 100)}...\n\nDaemon is running in the background. Results will be saved to \`.agent-portal/scheduled-results/\`.\nUse \`list_schedules\` to see all schedules, \`get_scheduled_results\` to read outputs.`,
+        text: `⏰ Task scheduled.\n\n- **Schedule ID**: \`${result.scheduleId}\`\n- **Cron**: \`${args.cron}\`\n- **Next run**: ${result.nextRun || 'unknown'}\n- **Prompt**: ${preview(args.prompt, 100)}...\n\nDaemon is running in the background. Results are saved in local portal project state.\nUse \`list_schedules\` to see all schedules, \`get_scheduled_results\` to read outputs.`,
       }],
     };
   } catch (error) {

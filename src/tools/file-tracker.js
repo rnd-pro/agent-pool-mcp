@@ -1,7 +1,6 @@
-import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { ensureDirFor, getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
 
-const CONTEXT_DIR = '.agent-portal';
 const CONTEXT_FILE = 'active_context.json';
 
 // In-memory cache for fast access
@@ -9,16 +8,22 @@ let activeFilesCache = new Set();
 let cwdContext = '';
 
 function getContextPath(cwd) {
-  return join(cwd, CONTEXT_DIR, CONTEXT_FILE);
+  return getProjectStatePath(cwd, CONTEXT_FILE);
+}
+
+function getLegacyContextPath(cwd) {
+  return getLegacyAgentPortalPath(cwd, CONTEXT_FILE);
 }
 
 function loadCache(cwd) {
   if (cwd !== cwdContext) {
     cwdContext = cwd;
     const filePath = getContextPath(cwd);
-    if (existsSync(filePath)) {
+    const legacyPath = getLegacyContextPath(cwd);
+    const sourcePath = existsSync(filePath) ? filePath : legacyPath;
+    if (existsSync(sourcePath)) {
       try {
-        const files = JSON.parse(readFileSync(filePath, 'utf-8'));
+        const files = JSON.parse(readFileSync(sourcePath, 'utf-8'));
         activeFilesCache = new Set(files);
       } catch {
         activeFilesCache = new Set();
@@ -30,11 +35,9 @@ function loadCache(cwd) {
 }
 
 function syncToDisk(cwd) {
-  const dirPath = join(cwd, CONTEXT_DIR);
-  if (!existsSync(dirPath)) {
-    mkdirSync(dirPath, { recursive: true });
-  }
-  writeFileSync(getContextPath(cwd), JSON.stringify(Array.from(activeFilesCache), null, 2));
+  const filePath = getContextPath(cwd);
+  ensureDirFor(filePath);
+  writeFileSync(filePath, JSON.stringify(Array.from(activeFilesCache), null, 2));
 }
 
 export function trackFiles(cwd, paths) {

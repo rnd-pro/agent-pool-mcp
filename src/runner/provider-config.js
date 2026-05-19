@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { resolvePortalUrl } from './url-resolver.js';
 
 /**
  * Create an isolated Gemini CLI config with portal URL.
@@ -141,7 +142,8 @@ export function getClaudeGatewayEnv(portalUrl) {
   let gateway = config.anthropicGateway || config.settings?.anthropicGateway || null;
   if (!gateway?.enabled) return {};
 
-  let baseUrl = gateway.baseUrl || (portalUrl ? toAnthropicBaseUrl(portalUrl) : null);
+  let resolvedPortalUrl = portalUrl || resolvePortalUrl();
+  let baseUrl = gateway.baseUrl || (resolvedPortalUrl ? toAnthropicBaseUrl(resolvedPortalUrl) : null);
   if (!baseUrl) return {};
 
   return {

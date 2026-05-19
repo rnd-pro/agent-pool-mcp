@@ -7,11 +7,10 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
+import { ensureDirFor, getGlobalConfigPath, getLegacyAgentPortalPath } from '../runtime/paths.js';
 
-const GROUPS_DIR = '.agent-portal';
-const GROUPS_FILE = 'groups.json';
-const GROUPS_STATE_FILE = 'group-states.json';
+const GROUPS_FILE = 'resource-groups.json';
+const GROUPS_STATE_FILE = 'resource-group-states.json';
 
 /**
  * Get path to group-states.json for a project.
@@ -20,7 +19,7 @@ const GROUPS_STATE_FILE = 'group-states.json';
  * @returns {string}
  */
 function getGroupsStatePath(cwd) {
-  return path.join(cwd, GROUPS_DIR, GROUPS_STATE_FILE);
+  return getGlobalConfigPath(GROUPS_STATE_FILE);
 }
 
 /**
@@ -46,11 +45,9 @@ function loadGroupStates(cwd) {
  * @param {Object<string, object>} states
  */
 function saveGroupStates(cwd, states) {
-  const dirPath = path.join(cwd, GROUPS_DIR);
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-  fs.writeFileSync(getGroupsStatePath(cwd), JSON.stringify(states, null, 2));
+  const filePath = getGroupsStatePath(cwd);
+  ensureDirFor(filePath);
+  fs.writeFileSync(filePath, JSON.stringify(states, null, 2));
 }
 
 /**
@@ -60,7 +57,11 @@ function saveGroupStates(cwd, states) {
  * @returns {string}
  */
 function getGroupsPath(cwd) {
-  return path.join(cwd, GROUPS_DIR, GROUPS_FILE);
+  return getGlobalConfigPath(GROUPS_FILE);
+}
+
+function getLegacyGroupsPath(cwd) {
+  return getLegacyAgentPortalPath(cwd, 'groups.json');
 }
 
 /**
@@ -71,9 +72,11 @@ function getGroupsPath(cwd) {
  */
 function loadGroups(cwd) {
   const filePath = getGroupsPath(cwd);
-  if (!fs.existsSync(filePath)) return {};
+  const legacyPath = getLegacyGroupsPath(cwd);
+  let sourcePath = fs.existsSync(filePath) ? filePath : legacyPath;
+  if (!fs.existsSync(sourcePath)) return {};
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    return JSON.parse(fs.readFileSync(sourcePath, 'utf-8'));
   } catch {
     return {};
   }
@@ -86,11 +89,9 @@ function loadGroups(cwd) {
  * @param {Object<string, object>} groups
  */
 function saveGroups(cwd, groups) {
-  const dirPath = path.join(cwd, GROUPS_DIR);
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-  fs.writeFileSync(getGroupsPath(cwd), JSON.stringify(groups, null, 2));
+  const filePath = getGroupsPath(cwd);
+  ensureDirFor(filePath);
+  fs.writeFileSync(filePath, JSON.stringify(groups, null, 2));
 }
 
 /**

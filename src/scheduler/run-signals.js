@@ -12,8 +12,13 @@
 import { writeFileSync, readFileSync, readdirSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { getProjectStatePath } from '../runtime/paths.js';
 
-const RUNS_DIR = '.agent-portal/runs';
+const RUNS_DIR = 'runs';
+
+function runsDir(cwd) {
+  return getProjectStatePath(cwd, RUNS_DIR);
+}
 
 /**
  * Write a signal file for a specific run.
@@ -23,7 +28,7 @@ const RUNS_DIR = '.agent-portal/runs';
  * @param {object} signal - { type, stepName, output?, reason?, targetStep? }
  */
 export function writeSignal(cwd, runId, signal) {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir(cwd);
   mkdirSync(dir, { recursive: true });
 
   const id = randomUUID().split('-')[0];
@@ -45,7 +50,7 @@ export function writeSignal(cwd, runId, signal) {
  * @returns {Array<{ type: string, stepName: string, fileName: string, [key: string]: any }>}
  */
 export function consumeSignals(cwd, runId) {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir(cwd);
   if (!existsSync(dir)) return [];
 
   const prefix = `${runId}.signal-`;
@@ -73,7 +78,7 @@ export function consumeSignals(cwd, runId) {
  * @param {Array<{ fileName: string }>} signals
  */
 export function deleteSignals(cwd, signals) {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir(cwd);
   for (const s of signals) {
     try { unlinkSync(join(dir, s.fileName)); }
     catch { /* ignore */ }

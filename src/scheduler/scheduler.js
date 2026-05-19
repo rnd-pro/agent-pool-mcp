@@ -11,13 +11,34 @@ import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { nextCronRun } from './cron.js';
+import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAEMON_SCRIPT = join(__dirname, 'daemon.js');
 
-const SCHEDULE_FILE = '.agent-portal/schedule.json';
-const RESULTS_DIR = '.agent-portal/scheduled-results';
-const PID_FILE = '.agent-portal/scheduler.pid';
+const SCHEDULE_FILE = 'schedule.json';
+const RESULTS_DIR = 'scheduled-results';
+const PID_FILE = 'scheduler.pid';
+
+function schedulePath(cwd) {
+  return getProjectStatePath(cwd, SCHEDULE_FILE);
+}
+
+function legacySchedulePath(cwd) {
+  return getLegacyAgentPortalPath(cwd, SCHEDULE_FILE);
+}
+
+function resultsDir(cwd) {
+  return getProjectStatePath(cwd, RESULTS_DIR);
+}
+
+function legacyResultsDir(cwd) {
+  return getLegacyAgentPortalPath(cwd, RESULTS_DIR);
+}
+
+function pidPath(cwd) {
+  return getProjectStatePath(cwd, PID_FILE);
+}
 
 // ─── Schedule CRUD ──────────────────────────────────────────
 
@@ -27,7 +48,7 @@ const PID_FILE = '.agent-portal/scheduler.pid';
  * @returns {Array<object>}
  */
 export function readSchedules(cwd) {
-  const filePath = join(cwd, SCHEDULE_FILE);
+  const filePath = existsSync(schedulePath(cwd)) ? schedulePath(cwd) : legacySchedulePath(cwd);
   if (!existsSync(filePath)) return [];
   try {
     return JSON.parse(readFileSync(filePath, 'utf-8'));
@@ -42,7 +63,7 @@ export function readSchedules(cwd) {
  * @param {Array<object>} schedules
  */
 function writeSchedules(cwd, schedules) {
-  const filePath = join(cwd, SCHEDULE_FILE);
+  const filePath = schedulePath(cwd);
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(schedules, null, 2));
 }
@@ -133,7 +154,7 @@ export function listSchedules(cwd) {
  * @returns {Array<object>}
  */
 export function getScheduledResults(cwd, scheduleId) {
-  const dir = join(cwd, RESULTS_DIR);
+  const dir = existsSync(resultsDir(cwd)) ? resultsDir(cwd) : legacyResultsDir(cwd);
   if (!existsSync(dir)) return [];
 
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
@@ -159,16 +180,16 @@ export function getScheduledResults(cwd, scheduleId) {
  * @returns {{ running: boolean, pid: number | null }}
  */
 export function getDaemonStatus(cwd) {
-  const pidPath = join(cwd, PID_FILE);
-  if (!existsSync(pidPath)) return { running: false, pid: null };
+  const filePath = pidPath(cwd);
+  if (!existsSync(filePath)) return { running: false, pid: null };
 
   try {
-    const pid = parseInt(readFileSync(pidPath, 'utf-8').trim());
+    const pid = parseInt(readFileSync(filePath, 'utf-8').trim());
     process.kill(pid, 0); // Check if alive (signal 0 = no-op)
     return { running: true, pid };
   } catch {
     // Stale PID file
-    try { unlinkSync(pidPath); } catch { /* ignore */ }
+    try { unlinkSync(filePath); } catch { /* ignore */ }
     return { running: false, pid: null };
   }
 }

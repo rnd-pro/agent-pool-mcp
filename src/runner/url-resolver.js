@@ -46,16 +46,24 @@ export function findActivePortalPort() {
 
   try {
     let files = fs.readdirSync(BACKENDS_DIR).filter(f => f.startsWith('portal-') && f.endsWith('.json'));
+    let live = [];
     for (let f of files) {
       try {
         let data = JSON.parse(fs.readFileSync(path.join(BACKENDS_DIR, f), 'utf8'));
         // Verify process is alive
         try {
           process.kill(data.pid, 0);
-          return data.port;
+          live.push(data);
         } catch { /* process dead — skip */ }
       } catch { /* corrupt file — skip */ }
     }
+
+    let cwd = path.resolve(process.cwd());
+    let current = live.find(entry => path.resolve(entry.project || '') === cwd);
+    if (current?.port) return current.port;
+
+    live.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+    return live[0]?.port || null;
   } catch { /* dir read error */ }
 
   return null;

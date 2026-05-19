@@ -15,10 +15,11 @@
  * @module agent-pool/tools/messaging
  */
 
-import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { appendFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { getProjectStatePath } from '../runtime/paths.js';
 
-const MESSAGES_DIR = '.agent-portal/messages';
+const MESSAGES_DIR = 'messages';
 
 /**
  * Sanitize channel name for use as filename.
@@ -42,7 +43,7 @@ function sanitizeChannel(channel) {
 export function sendMessage(cwd, { channel, payload, from }) {
   if (!channel) return { success: false, error: 'channel is required' };
 
-  const dir = join(cwd, MESSAGES_DIR);
+  const dir = getProjectStatePath(cwd, MESSAGES_DIR);
   mkdirSync(dir, { recursive: true });
 
   const filePath = join(dir, `${sanitizeChannel(channel)}.jsonl`);
@@ -69,7 +70,7 @@ export function sendMessage(cwd, { channel, payload, from }) {
 export function getMessages(cwd, { channel, clear }) {
   if (!channel) return { messages: [], count: 0, error: 'channel is required' };
 
-  const filePath = join(cwd, MESSAGES_DIR, `${sanitizeChannel(channel)}.jsonl`);
+  const filePath = getProjectStatePath(cwd, MESSAGES_DIR, `${sanitizeChannel(channel)}.jsonl`);
   if (!existsSync(filePath)) return { messages: [], count: 0 };
 
   let content;

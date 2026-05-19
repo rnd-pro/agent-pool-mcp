@@ -2,7 +2,7 @@
  * Pipeline management — CRUD for pipeline definitions and run state.
  *
  * Pipelines are stored as JSON templates in .agent-portal/pipelines/.
- * Each execution creates a run state in .agent-portal/runs/.
+ * Each execution creates local run state in the portal home directory.
  *
  * @module agent-pool/scheduler/pipeline
  */
@@ -13,9 +13,14 @@ import { randomUUID } from 'node:crypto';
 import { ensureDaemon } from './scheduler.js';
 import { killGroup } from '../runner/process-manager.js';
 import { writeSignal } from './run-signals.js';
+import { getProjectStatePath } from '../runtime/paths.js';
 
 const PIPELINES_DIR = '.agent-portal/pipelines';
-const RUNS_DIR = '.agent-portal/runs';
+const RUNS_DIR = 'runs';
+
+function runsDir(cwd) {
+  return getProjectStatePath(cwd, RUNS_DIR);
+}
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -133,7 +138,7 @@ export function runPipeline(cwd, pipelineId) {
   const pipeline = getPipeline(cwd, pipelineId);
   if (!pipeline) return null;
 
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir(cwd);
   mkdirSync(dir, { recursive: true });
 
   const runId = randomUUID().split('-')[0];
@@ -178,7 +183,7 @@ export function runPipeline(cwd, pipelineId) {
  * @returns {object|null}
  */
 export function getRun(cwd, runId) {
-  const filePath = join(cwd, RUNS_DIR, `${runId}.json`);
+  const filePath = join(runsDir(cwd), `${runId}.json`);
   if (!existsSync(filePath)) return null;
   try { return JSON.parse(readFileSync(filePath, 'utf-8')); }
   catch { return null; }
@@ -191,7 +196,7 @@ export function getRun(cwd, runId) {
  * @param {object} run
  */
 export function saveRun(cwd, runId, run) {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir(cwd);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${runId}.json`), JSON.stringify(run, null, 2));
 }
@@ -203,7 +208,7 @@ export function saveRun(cwd, runId, run) {
  * @returns {Array<object>}
  */
 export function listRuns(cwd, pipelineId) {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir(cwd);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter(f => f.endsWith('.json') && !f.includes('.signal-'))
@@ -254,7 +259,7 @@ export function cancelRun(cwd, runId) {
  * @returns {{ run: object, runId: string } | null}
  */
 export function findActiveRunByStep(cwd, stepName) {
-  const dir = join(cwd, RUNS_DIR);
+  const dir = runsDir(cwd);
   if (!existsSync(dir)) return null;
 
   for (const f of readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('.signal-'))) {
@@ -320,7 +325,7 @@ export function bounceBack(cwd, targetStepName, reason, runId) {
   if (resolvedRunId) {
     run = getRun(cwd, resolvedRunId);
   } else {
-    const dir = join(cwd, RUNS_DIR);
+    const dir = runsDir(cwd);
     if (!existsSync(dir)) return { success: false };
     for (const f of readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('.signal-'))) {
       try {
