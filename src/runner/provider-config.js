@@ -114,12 +114,6 @@ export function createClaudeMcpConfig(portalUrl) {
   return { configPath, tmpDir };
 }
 
-function readPortalConfig() {
-  let configPath = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
-  if (!fs.existsSync(configPath)) return {};
-  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch { return {}; }
-}
-
 function toAnthropicBaseUrl(portalUrl) {
   try {
     let url = new URL(portalUrl);
@@ -132,14 +126,21 @@ function toAnthropicBaseUrl(portalUrl) {
   }
 }
 
+function readPortalConfig() {
+  let configPath = process.env.PORTAL_CONFIG_PATH
+    || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
+  if (!fs.existsSync(configPath)) return {};
+  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch { return {}; }
+}
+
 /**
  * Build Claude Code gateway env overrides when portal anthropicGateway is enabled.
  * @param {string|null} portalUrl - Portal MCP URL
  * @returns {object}
  */
 export function getClaudeGatewayEnv(portalUrl) {
-  let config = readPortalConfig();
-  let gateway = config.anthropicGateway || config.settings?.anthropicGateway || null;
+  let portalConfig = readPortalConfig();
+  let gateway = portalConfig.anthropicGateway || portalConfig.settings?.anthropicGateway || null;
   if (!gateway?.enabled) return {};
 
   let resolvedPortalUrl = portalUrl || resolvePortalUrl();

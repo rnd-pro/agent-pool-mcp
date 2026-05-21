@@ -164,7 +164,7 @@ Run workers on remote servers via SSH — same interface, transparent stdio forw
 {
   "runners": [
     { "id": "local", "type": "local" },
-    { "id": "gpu", "type": "ssh", "host": "gpu-server", "cwd": "/home/dev/project" }
+    { "id": "gpu", "type": "ssh", "host": "gpu-server", "cwd": "/workspace/project" }
   ],
   "defaultRunner": "local"
 }

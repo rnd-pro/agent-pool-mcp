@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { trackChild, killGroup, untrackChild } from './process-manager.js';
+import { trackChild, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
 import { createProcessWatchdog } from './timeout-manager.js';

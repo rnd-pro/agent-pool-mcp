@@ -1,0 +1,107 @@
+import { describe, it, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+let oldPath;
+let oldArgsFile;
+let oldStderr;
+let oldPortalConfigDir;
+let tmpDir;
+
+describe('claude runner', () => {
+  beforeEach(() => {
+    oldPath = process.env.PATH;
+    oldArgsFile = process.env.CLAUDE_RUNNER_ARGS_FILE;
+    oldStderr = process.env.CLAUDE_RUNNER_STDERR;
+    oldPortalConfigDir = process.env.PORTAL_CONFIG_DIR;
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-runner-test-'));
+    process.env.PORTAL_CONFIG_DIR = tmpDir;
+
+    let binPath = path.join(tmpDir, 'claude');
+    fs.writeFileSync(binPath, `#!/usr/bin/env node
+const fs = require('node:fs');
+if (process.env.CLAUDE_RUNNER_ARGS_FILE) {
+  fs.writeFileSync(process.env.CLAUDE_RUNNER_ARGS_FILE, JSON.stringify(process.argv.slice(2)));
+}
+if (process.env.CLAUDE_RUNNER_STDERR) {
+  process.stderr.write(process.env.CLAUDE_RUNNER_STDERR);
+}
+const events = [
+  { type: 'system', subtype: 'init', session_id: 'session-test' },
+  { type: 'assistant', message: { content: [
+    { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } },
+    { type: 'text', text: 'Claude response' }
+  ] } },
+  { type: 'tool_result', tool_use_id: 'tool-1', content: [{ type: 'text', text: 'ok' }] },
+  { type: 'result', result: 'Claude final response', total_cost_usd: 0.01, duration_ms: 123, num_turns: 1 }
+];
+for (const event of events) console.log(JSON.stringify(event));
+`);
+    fs.chmodSync(binPath, 0o755);
+    process.env.PATH = `${tmpDir}${path.delimiter}${oldPath}`;
+  });
+
+  afterEach(() => {
+    process.env.PATH = oldPath;
+    if (oldArgsFile === undefined) {
+      delete process.env.CLAUDE_RUNNER_ARGS_FILE;
+    } else {
+      process.env.CLAUDE_RUNNER_ARGS_FILE = oldArgsFile;
+    }
+    if (oldStderr === undefined) {
+      delete process.env.CLAUDE_RUNNER_STDERR;
+    } else {
+      process.env.CLAUDE_RUNNER_STDERR = oldStderr;
+    }
+    if (oldPortalConfigDir === undefined) {
+      delete process.env.PORTAL_CONFIG_DIR;
+    } else {
+      process.env.PORTAL_CONFIG_DIR = oldPortalConfigDir;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('runs claude print mode and parses stream-json events', async () => {
+    let argsFile = path.join(tmpDir, 'args.json');
+    process.env.CLAUDE_RUNNER_ARGS_FILE = argsFile;
+
+    let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
+    let result = await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, timeout: 5 });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.sessionId, 'session-test');
+    assert.equal(result.response, 'Claude final response');
+    assert.equal(result.stats.costUsd, 0.01);
+    assert.deepEqual(result.toolCalls, [{ name: 'Bash', args: { command: 'pwd' } }]);
+    assert.deepEqual(result.toolResults, [{ name: 'tool', output: 'ok' }]);
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.deepEqual(args.slice(0, 6), ['-p', 'hello', '--output-format', 'stream-json', '--verbose', '--permission-mode']);
+    assert.equal(args[6], 'bypassPermissions');
+  });
+
+  it('maps read-only approval mode to Claude plan mode', async () => {
+    let argsFile = path.join(tmpDir, 'args-plan.json');
+    process.env.CLAUDE_RUNNER_ARGS_FILE = argsFile;
+
+    let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
+    await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, approvalMode: 'plan', timeout: 5 });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+  });
+
+  it('does not pass the UI default sentinel as a real model', async () => {
+    let argsFile = path.join(tmpDir, 'args-default.json');
+    process.env.CLAUDE_RUNNER_ARGS_FILE = argsFile;
+
+    let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
+    await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, model: 'default', timeout: 5 });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.equal(args.includes('--model'), false);
+    assert.equal(args.includes('default'), false);
+  });
+});

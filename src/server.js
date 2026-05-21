@@ -22,7 +22,7 @@ import { runClaudeStreaming } from './runner/claude-runner.js';
 import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
-import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, cancelTask, setNotifyCallback } from './tools/results.js';
+import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, listTaskState, cancelTask, finishTask, setNotifyCallback } from './tools/results.js';
 import { listSkills, getSkillContent, createSkill, deleteSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
@@ -35,6 +35,7 @@ import { resolveAgent, buildAgentCatalog } from './agents/agent-resolver.js';
 import { trackFiles, untrackFiles } from './tools/file-tracker.js';
 import { handleGetTrackedFiles, handleListWorkflows, handleSearchByTags, handleGetWorkflowContent } from './tools/workflow-tools.js';
 import { handleResolveContext } from './tools/context-resolver.js';
+import { createToolRouter } from './tools/toolRouter.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
 
@@ -249,6 +250,27 @@ function requiresDepthBlock(toolName, args = {}) {
   return resolveDelegateProviderForGuard(toolName, args) === 'gemini';
 }
 
+function guardToolCall(name, args = {}) {
+  if (!GEMINI_TOOLS.has(name)) return null;
+  if (requiresDepthBlock(name, args)) return DEPTH_EXCEEDED_ERROR;
+
+  const isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(name);
+  if (!isDelegateTool) {
+    return checkGemini() ? null : GEMINI_REQUIRED_ERROR;
+  }
+
+  const provider = args.provider || null;
+  if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
+  if (provider === 'opencode' && !checkOpencode()) {
+    return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
+  }
+  if (provider === 'codex' && !checkCodex()) {
+    return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
+  }
+  if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
+  return null;
+}
+
 
 const DEPTH_EXCEEDED_ERROR = {
   content: [{
@@ -339,129 +361,122 @@ export function createServer() {
     tools: getToolDefinitions({ openCodeModels: _cachedModels }),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args = {} } = request.params ?? {};
-
-    // Guard: tools that require external CLI providers
-    if (GEMINI_TOOLS.has(name)) {
-      if (requiresDepthBlock(name, args)) return DEPTH_EXCEEDED_ERROR;
-
-      const isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(name);
-      if (isDelegateTool) {
-        const provider = args.provider || null;
-        if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
-        if (provider === 'opencode' && !checkOpencode()) {
-          return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
-        }
-        if (provider === 'codex' && !checkCodex()) {
-          return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
-        }
-        if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
-      } else {
-        if (!checkGemini()) return GEMINI_REQUIRED_ERROR;
-      }
-    }
-
-    let response;
-    try {
-      switch (name) {
-        case 'delegate_task':
-          response = handleDelegateTask(args); break;
-        case 'delegate_task_readonly':
-          response = handleDelegateReadonly(args); break;
-        case 'get_task_result':
-          response = formatTaskResult(args.task_id); break;
-        case 'cancel_task':
-          response = cancelTask(args.task_id); break;
-        case 'list_tasks':
-          response = { content: [{ type: 'text', text: JSON.stringify(listAllTasks(), null, 2) }] }; break;
-        case 'get_board_state':
-          response = { content: [{ type: 'text', text: JSON.stringify(getBoardStore(args.cwd || defaultCwd).getSnapshot(), null, 2) }] }; break;
-        case 'consult_peer':
-          response = consultPeer(args, defaultCwd); break;
-        case 'list_sessions':
-          response = await handleListSessions(args); break;
-        case 'list_skills':
-          response = handleListSkills(args); break;
-        case 'get_skill_content':
-          response = handleGetSkillContent(args); break;
-        case 'resolve_context':
-          response = handleResolveContext(args, defaultCwd); break;
-        case 'create_skill':
-          response = handleCreateSkill(args); break;
-        case 'delete_skill':
-          response = handleDeleteSkill(args); break;
-        case 'install_skill':
-          response = handleInstallSkill(args); break;
-        case 'schedule_task':
-          response = handleScheduleTask(args); break;
-        case 'list_schedules':
-          response = handleListSchedules(args); break;
-        case 'cancel_schedule':
-          response = handleCancelSchedule(args); break;
-        case 'get_scheduled_results':
-          response = handleGetScheduledResults(args); break;
-        case 'get_usage_guide':
-          response = handleGetUsageGuide(args); break;
-        case 'create_pipeline':
-          response = handleCreatePipeline(args); break;
-        case 'run_pipeline':
-          response = handleRunPipeline(args); break;
-        case 'list_pipelines':
-          response = handleListPipelines(args); break;
-        case 'get_pipeline_status':
-          response = handleGetPipelineStatus(args); break;
-        case 'cancel_pipeline':
-          response = handleCancelPipeline(args); break;
-        case 'signal_step_complete':
-          response = handleSignalStepComplete(args); break;
-        case 'bounce_back':
-          response = handleBounceBack(args); break;
-        case 'create_group':
-          response = handleCreateGroup(args); break;
-        case 'list_groups':
-          response = handleListGroups(args); break;
-        case 'delegate_to_group':
-          response = handleDelegateToGroup(args); break;
-        case 'send_message':
-          response = handleSendMessage(args); break;
-        case 'get_messages':
-          response = handleGetMessages(args); break;
-        case 'save_script':
-          response = { content: [{ type: 'text', text: `Script saved at ${saveScript(args.cwd || defaultCwd, args.name, args.code, args.ext)}` }] }; break;
-        case 'list_scripts':
-          response = { content: [{ type: 'text', text: JSON.stringify(listScripts(args.cwd || defaultCwd), null, 2) }] }; break;
-        case 'track_files':
-          response = { content: [{ type: 'text', text: `Tracked files: \n- ${trackFiles(args.cwd || defaultCwd, args.files).join('\n- ')}` }] }; break;
-        case 'untrack_files':
-          response = { content: [{ type: 'text', text: `Tracked files: \n- ${untrackFiles(args.cwd || defaultCwd, args.files).join('\n- ')}` }] }; break;
-        case 'get_tracked_files':
-          response = handleGetTrackedFiles(args, defaultCwd); break;
-        case 'list_workflows':
-          response = handleListWorkflows(args, defaultCwd); break;
-        case 'search_by_tags':
-          response = handleSearchByTags(args, defaultCwd); break;
-        case 'get_workflow_content':
-          response = handleGetWorkflowContent(args, defaultCwd); break;
-        default:
-          response = { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
-      }
-    } catch (error) {
-      response = { content: [{ type: 'text', text: `CLI provider error: ${error.message}` }], isError: true };
-    }
-
-    // Append active tasks footer to every response
-    const footer = getActiveTasks();
-    if (footer && response.content?.[0]?.text) {
-      response.content[0].text += footer;
-    }
-    return response;
-  });
+  server.setRequestHandler(CallToolRequestSchema, createToolRouter({
+    guardToolCall,
+    getActiveTasks,
+    handlers: {
+      handleDelegateTask,
+      handleDelegateReadonly,
+      handleGetTaskResult,
+      handleCancelTask,
+      handleFinishTask,
+      handleListTasks,
+      handleGetBoardState,
+      handleConsultPeer,
+      handleListSessions,
+      handleListSkills,
+      handleGetSkillContent,
+      handleResolveContext: (args) => handleResolveContext(args, defaultCwd),
+      handleCreateSkill,
+      handleDeleteSkill,
+      handleInstallSkill,
+      handleScheduleTask,
+      handleListSchedules,
+      handleCancelSchedule,
+      handleGetScheduledResults,
+      handleGetUsageGuide,
+      handleCreatePipeline,
+      handleRunPipeline,
+      handleListPipelines,
+      handleGetPipelineStatus,
+      handleCancelPipeline,
+      handleSignalStepComplete,
+      handleBounceBack,
+      handleCreateGroup,
+      handleListGroups,
+      handleDelegateToGroup,
+      handleSendMessage,
+      handleGetMessages,
+      handleSaveScript,
+      handleListScripts,
+      handleTrackFiles,
+      handleUntrackFiles,
+      handleGetTrackedFiles: (args) => handleGetTrackedFiles(args, defaultCwd),
+      handleListWorkflows: (args) => handleListWorkflows(args, defaultCwd),
+      handleSearchByTags: (args) => handleSearchByTags(args, defaultCwd),
+      handleGetWorkflowContent: (args) => handleGetWorkflowContent(args, defaultCwd),
+    },
+  }));
 
   return server;
 }
 
 // ─── Tool Handlers ──────────────────────────────────────────────────
+
+function handleGetTaskResult(args) {
+  return formatTaskResult(args.task_id);
+}
+
+function handleCancelTask(args) {
+  return cancelTask(args.task_id);
+}
+
+function handleFinishTask(args) {
+  return finishTask(args.task_id, args);
+}
+
+function handleListTasks() {
+  return { content: [{ type: 'text', text: JSON.stringify(listTaskState(), null, 2) }] };
+}
+
+function handleGetBoardState(args) {
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify(getBoardStore(args.cwd || defaultCwd).getSnapshot(), null, 2),
+    }],
+  };
+}
+
+function handleConsultPeer(args) {
+  return consultPeer(args, defaultCwd);
+}
+
+function handleSaveScript(args) {
+  return {
+    content: [{
+      type: 'text',
+      text: `Script saved at ${saveScript(args.cwd || defaultCwd, args.name, args.code, args.ext)}`,
+    }],
+  };
+}
+
+function handleListScripts(args) {
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify(listScripts(args.cwd || defaultCwd), null, 2),
+    }],
+  };
+}
+
+function handleTrackFiles(args) {
+  return {
+    content: [{
+      type: 'text',
+      text: `Tracked files: \n- ${trackFiles(args.cwd || defaultCwd, args.files).join('\n- ')}`,
+    }],
+  };
+}
+
+function handleUntrackFiles(args) {
+  return {
+    content: [{
+      type: 'text',
+      text: `Tracked files: \n- ${untrackFiles(args.cwd || defaultCwd, args.files).join('\n- ')}`,
+    }],
+  };
+}
 
 /**
  * Shared handler for delegate_task and delegate_task_readonly.
@@ -707,6 +722,7 @@ function handleDelegateReadonly(args) {
 
 /**
  * @param {object} args
+ * @returns {Promise<object>}
  */
 async function handleListSessions(args) {
   const sessions = await listGeminiSessions(args.cwd ?? defaultCwd);
@@ -721,7 +737,10 @@ async function handleListSessions(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleListSkills(args) {
   const skills = listSkills(args.cwd ?? defaultCwd);
   if (args.json) { return { content: [{ type: "text", text: JSON.stringify(skills) }] }; }
@@ -737,7 +756,10 @@ function handleListSkills(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleGetSkillContent(args) {
   const skillName = args.name || args.skill_name || args.skill;
   if (!skillName) {
@@ -752,7 +774,10 @@ function handleGetSkillContent(args) {
   return { content: [{ type: 'text', text: JSON.stringify(skill, null, 2) }] };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleCreateSkill(args) {
   const filePath = createSkill(args.cwd ?? defaultCwd, args.skill_name, args.description, args.instructions);
   return {
@@ -763,7 +788,10 @@ function handleCreateSkill(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleDeleteSkill(args) {
   const deleted = deleteSkill(args.cwd ?? defaultCwd, args.skill_name);
   return {
@@ -774,7 +802,10 @@ function handleDeleteSkill(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleInstallSkill(args) {
   // Install from Open Memory will be handled by the portal API in the future.
   // For now, this tool is a no-op since there are no external tiers.
@@ -788,7 +819,10 @@ function handleInstallSkill(args) {
 
 // ─── Scheduler Handlers ─────────────────────────────────────────────
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleScheduleTask(args = {}) {
   if (!isNonEmptyString(args.prompt)) {
     return {
@@ -827,7 +861,10 @@ function handleScheduleTask(args = {}) {
   }
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleListSchedules(args) {
   const cwd = args.cwd ?? defaultCwd;
   const schedules = listSchedules(cwd);
@@ -849,7 +886,10 @@ function handleListSchedules(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleCancelSchedule(args) {
   const cwd = args.cwd ?? defaultCwd;
   const removed = removeSchedule(cwd, args.schedule_id);
@@ -863,7 +903,10 @@ function handleCancelSchedule(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleGetScheduledResults(args) {
   const cwd = args.cwd ?? defaultCwd;
   const results = getScheduledResults(cwd, args.schedule_id);
@@ -886,7 +929,10 @@ function handleGetScheduledResults(args) {
 
 // ─── Pipeline Handlers ─────────────────────────────────────────────
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleCreatePipeline(args) {
   const cwd = args.cwd ?? defaultCwd;
   const result = createPipeline(cwd, args);
@@ -898,7 +944,10 @@ function handleCreatePipeline(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleRunPipeline(args) {
   const cwd = args.cwd ?? defaultCwd;
   const result = runPipeline(cwd, args.pipeline_id);
@@ -916,7 +965,10 @@ function handleRunPipeline(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleListPipelines(args) {
   const cwd = args.cwd ?? defaultCwd;
   const pipelines = listPipelines(cwd);
@@ -956,7 +1008,10 @@ function handleListPipelines(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleGetPipelineStatus(args) {
   const cwd = args.cwd ?? defaultCwd;
   const run = getRun(cwd, args.run_id);
@@ -989,7 +1044,10 @@ function handleGetPipelineStatus(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleCancelPipeline(args) {
   const cwd = args.cwd ?? defaultCwd;
   const success = cancelRun(cwd, args.run_id);
@@ -1001,7 +1059,10 @@ function handleCancelPipeline(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleSignalStepComplete(args) {
   const cwd = args.cwd ?? defaultCwd;
   const result = signalStepComplete(cwd, args.step_name, args.output, args.run_id);
@@ -1023,7 +1084,10 @@ function handleSignalStepComplete(args) {
   }
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleBounceBack(args) {
   const cwd = args.cwd ?? defaultCwd;
   const info = bounceBack(cwd, args.step_name, args.reason, args.run_id);
@@ -1045,7 +1109,10 @@ function handleBounceBack(args) {
   }
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleGetUsageGuide(args) {
   const guidePath = path.resolve(__dirname, '..', 'GUIDE.md');
   if (!fs.existsSync(guidePath)) {
@@ -1088,7 +1155,10 @@ function handleGetUsageGuide(args) {
 
 // ─── Group Handlers ─────────────────────────────────────────────
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleCreateGroup(args) {
   const cwd = args.cwd ?? defaultCwd;
   const result = createGroup(cwd, {
@@ -1123,7 +1193,10 @@ function handleCreateGroup(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleListGroups(args) {
   const cwd = args.cwd ?? defaultCwd;
   const groups = listGroups(cwd);
@@ -1150,7 +1223,10 @@ function handleListGroups(args) {
   };
 }
 
-/** @param {object} args */
+/**
+ * @param {object} args
+ * @returns {object}
+ */
 function handleDelegateToGroup(args) {
   const cwd = args.cwd ?? defaultCwd;
   const group = getGroup(cwd, args.group);

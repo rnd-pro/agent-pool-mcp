@@ -23,7 +23,8 @@ import { consumeSignals, deleteSignals } from './run-signals.js';
 import { getClaudeGatewayEnv } from '../runner/provider-config.js';
 import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
 
-const POLL_INTERVAL_MS = 30_000; // Check schedules every 30 seconds
+const ACTIVE_POLL_INTERVAL_MS = 3_000;
+const POLL_INTERVAL_MS = 30_000;
 const PID_FILE = 'scheduler.pid';
 const SCHEDULE_FILE = 'schedule.json';
 const RESULTS_DIR = 'scheduled-results';
@@ -843,7 +844,7 @@ function tick() {
   }
 
   // Adaptive polling: fast when pipeline active, slow otherwise
-  const nextTickMs = hasActivePipeline ? 3000 : 30000;
+  const nextTickMs = hasActivePipeline ? ACTIVE_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
   setTimeout(tick, nextTickMs);
 }
 

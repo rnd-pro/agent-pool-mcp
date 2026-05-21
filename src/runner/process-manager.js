@@ -11,6 +11,7 @@ import { execSync } from 'node:child_process';
 
 /** @type {Map<number, {taskId: string, startTime: number, label: string}>} */
 const children = new Map();
+const DEFAULT_KILL_GRACE_MS = 500;
 
 /**
  * Register a spawned child process for tracking.
@@ -31,9 +32,11 @@ export function trackChild(pid, taskId, label = '') {
  * @returns {boolean} Whether kill signal was sent
  */
 export function killGroup(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(-pid, 'SIGTERM');
     children.delete(pid);
+    scheduleKillEscalation(pid);
     return true;
   } catch (err) {
     // ESRCH = process not found (already dead)
@@ -45,12 +48,30 @@ export function killGroup(pid) {
     try {
       process.kill(pid, 'SIGTERM');
       children.delete(pid);
+      scheduleKillEscalation(pid, false);
       return true;
     } catch {
       children.delete(pid);
       return false;
     }
   }
+}
+
+function scheduleKillEscalation(pid, group = true) {
+  let timer = setTimeout(() => {
+    try {
+      process.kill(group ? -pid : pid, 0);
+    } catch {
+      return;
+    }
+
+    try {
+      process.kill(group ? -pid : pid, 'SIGKILL');
+    } catch {
+      // Process already exited or cannot be killed; cleanup remains best effort.
+    }
+  }, DEFAULT_KILL_GRACE_MS);
+  timer.unref?.();
 }
 
 /**
@@ -74,6 +95,33 @@ export function killAll() {
     if (killGroup(pid)) killed++;
   }
   return killed;
+}
+
+/**
+ * Kill all tracked child processes for a specific task.
+ *
+ * @param {string} taskId
+ * @returns {{attempted: number, killed: number}}
+ */
+export function killChildrenForTask(taskId) {
+  let attempted = 0;
+  let killed = 0;
+  for (const [pid, info] of [...children.entries()]) {
+    if (info.taskId !== taskId) continue;
+    attempted++;
+    if (killGroup(pid)) killed++;
+  }
+  return { attempted, killed };
+}
+
+/**
+ * List tracked child processes for a specific task.
+ *
+ * @param {string} taskId
+ * @returns {Array<{pid: number, taskId: string, startTime: number, label: string}>}
+ */
+export function listChildrenForTask(taskId) {
+  return listChildren().filter((child) => child.taskId === taskId);
 }
 
 /**

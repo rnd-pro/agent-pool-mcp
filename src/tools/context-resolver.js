@@ -249,8 +249,9 @@ function buildContextItems({ cwd, skills, workflows, files }) {
 
 /**
  * Resolve a compact context plan for an agent task.
- * @param {{cwd?: string, task?: string, prompt?: string, agent_slug?: string, files?: string[], mode?: string, max_skills?: number, max_workflows?: number}} args
+ * @param {object} args
  * @param {string} defaultCwd
+ * @returns {object}
  */
 export function resolveContext(args = {}, defaultCwd = process.cwd()) {
   let cwd = args.cwd || defaultCwd;

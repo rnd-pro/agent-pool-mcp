@@ -20,7 +20,7 @@ function modelDescription(models) {
 
 /**
  * Generate tool definitions with dynamic model context.
- * @param {{ openCodeModels?: string[] }} [ctx]
+ * @param {object} [ctx]
  * @returns {Array}
  */
 export function getToolDefinitions(ctx = {}) {
@@ -164,6 +164,20 @@ export function getToolDefinitions(ctx = {}) {
       type: 'object',
       properties: {
         task_id: { type: 'string', description: 'Task ID to cancel.' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'finish_task',
+    description: 'Close a task lifecycle and clean up tracked child processes. Running tasks are cancelled by default; completed tasks keep their result unless remove_from_memory is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID to finish and clean up.' },
+        kill_process: { type: 'boolean', description: 'Kill tracked child processes for this task. Defaults to true.' },
+        recursive: { type: 'boolean', description: 'Also finish child tasks whose parentId matches this task. Defaults to true.' },
+        remove_from_memory: { type: 'boolean', description: 'Delete task entries from in-memory result store after cleanup. Defaults to false so reports remain readable.' },
       },
       required: ['task_id'],
     },

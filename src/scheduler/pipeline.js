@@ -7,8 +7,8 @@
  * @module agent-pool/scheduler/pipeline
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureDaemon } from './scheduler.js';
 import { killGroup } from '../runner/process-manager.js';

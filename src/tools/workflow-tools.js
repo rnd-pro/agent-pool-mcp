@@ -21,6 +21,7 @@ function getWorkflowsDir(args = {}, defaultCwd = process.cwd()) {
 /**
  * @param {object} args
  * @param {string} defaultCwd
+ * @returns {{nodes: Map<string, object>, tagIndex: Map<string, string[]>}}
  */
 function getWorkflowIndex(args = {}, defaultCwd = process.cwd()) {
   return buildTagIndex(getWorkflowsDir(args, defaultCwd));
@@ -29,6 +30,7 @@ function getWorkflowIndex(args = {}, defaultCwd = process.cwd()) {
 /**
  * @param {object} args
  * @param {string} defaultCwd
+ * @returns {{content: Array<{type: string, text: string}>}}
  */
 export function handleGetTrackedFiles(args = {}, defaultCwd = process.cwd()) {
   return {
@@ -42,6 +44,7 @@ export function handleGetTrackedFiles(args = {}, defaultCwd = process.cwd()) {
 /**
  * @param {object} args
  * @param {string} defaultCwd
+ * @returns {{content: Array<{type: string, text: string}>}}
  */
 export function handleListWorkflows(args = {}, defaultCwd = process.cwd()) {
   const { nodes } = getWorkflowIndex(args, defaultCwd);
@@ -86,6 +89,7 @@ export function handleListWorkflows(args = {}, defaultCwd = process.cwd()) {
 /**
  * @param {object} args
  * @param {string} defaultCwd
+ * @returns {{content: Array<{type: string, text: string}>, isError?: boolean}}
  */
 export function handleSearchByTags(args = {}, defaultCwd = process.cwd()) {
   const { nodes, tagIndex } = getWorkflowIndex(args, defaultCwd);
@@ -118,6 +122,7 @@ export function handleSearchByTags(args = {}, defaultCwd = process.cwd()) {
 /**
  * @param {object} args
  * @param {string} defaultCwd
+ * @returns {{content: Array<{type: string, text: string}>, isError?: boolean}}
  */
 export function handleGetWorkflowContent(args = {}, defaultCwd = process.cwd()) {
   const { nodes } = getWorkflowIndex(args, defaultCwd);

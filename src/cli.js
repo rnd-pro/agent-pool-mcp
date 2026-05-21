@@ -39,6 +39,7 @@ const warn = (msg) => console.log(`  ${color.yellow('⚠️')}  ${msg}`);
 /**
  * Run comprehensive diagnostics (doctor mode).
  * Checks prerequisites, runners, and config.
+ * @returns {boolean}
  */
 export function runCheck() {
   console.log('');
@@ -204,6 +205,8 @@ export function validateStartup() {
 
 /**
  * Test if an SSH runner can connect and run gemini.
+ * @param {object} runner
+ * @returns {{ok: boolean, version?: string, error?: string}}
  */
 function testSshRunner(runner) {
   try {
@@ -229,6 +232,7 @@ function testSshRunner(runner) {
 
 /**
  * Find which config file is actually loaded.
+ * @returns {string|null}
  */
 function findConfigPath() {
   const candidates = [
@@ -243,6 +247,8 @@ function findConfigPath() {
 /**
  * Parse argv and run CLI command.
  * Returns true if a CLI command was handled (don't start MCP server).
+ * @param {string[]} argv
+ * @returns {boolean}
  */
 export function handleCli(argv) {
   const args = argv.slice(2);
