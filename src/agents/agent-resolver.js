@@ -52,6 +52,7 @@ function parseFrontmatter(raw) {
 
 /** @type {Map<string, string>|null} */
 let _skillCache = null;
+let _skillCacheDir = null;
 let _skillCacheTime = 0;
 const SKILL_CACHE_TTL = 5000;
 
@@ -63,7 +64,7 @@ const SKILL_CACHE_TTL = 5000;
  */
 function getSkillMap(skillsDir) {
   const now = Date.now();
-  if (_skillCache && (now - _skillCacheTime < SKILL_CACHE_TTL)) return _skillCache;
+  if (_skillCache && _skillCacheDir === skillsDir && (now - _skillCacheTime < SKILL_CACHE_TTL)) return _skillCache;
 
   let map = new Map();
   if (!existsSync(skillsDir)) return map;
@@ -85,6 +86,7 @@ function getSkillMap(skillsDir) {
 
   scan(skillsDir);
   _skillCache = map;
+  _skillCacheDir = skillsDir;
   _skillCacheTime = now;
   return map;
 }
@@ -102,12 +104,14 @@ function resolveSkills(body, skillNames, skillsDir) {
 
   for (let name of skillNames) {
     let content = map.get(name);
-    if (content) parts.push(content);
+    if (!content) throw new Error(`Required skill '${name}' not found`);
+    parts.push(content);
   }
 
   let resolvedBody = body.replace(/\{\{skill:([\w][\w-]*)\}\}/g, (_, name) => {
     let content = map.get(name);
-    return content || `<!-- skill "${name}" not found -->`;
+    if (!content) throw new Error(`Required inline skill '${name}' not found`);
+    return content;
   });
 
   parts.push(resolvedBody);

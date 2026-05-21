@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseFrontmatter as parseSkillFrontmatter } from '../src/tools/markdown-parser.js';
 import { parseFrontmatter as parseWorkflowFrontmatter } from '../src/tools/workflow-index.js';
 import { listSkills } from '../src/tools/skills.js';
-import { resolveAgentMetadata } from '../src/agents/agent-resolver.js';
+import { resolveAgent, resolveAgentMetadata } from '../src/agents/agent-resolver.js';
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-frontmatter-${Date.now()}`);
 
@@ -86,5 +86,18 @@ Agent body`);
     assert.deepStrictEqual(meta.models, ['deepseek/deepseek-v4-pro']);
     assert.deepStrictEqual(meta.contextTags, ['review', 'gateway']);
     assert.equal(meta.approvalMode, 'plan');
+  });
+
+  it('does not resolve agents with missing required skills', () => {
+    const agentsDir = path.join(TEST_CWD, '.agent-portal', 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(path.join(agentsDir, 'broken.md'), `---
+name: broken
+skills:
+  - missing-skill
+---
+Agent body`);
+
+    assert.equal(resolveAgent(TEST_CWD, 'broken'), null);
   });
 });

@@ -1,6 +1,8 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { listSkills } from './skills.js';
 import { buildTagIndex } from './workflow-index.js';
+import { parseFrontmatter } from './markdown-parser.js';
 import { resolveAgentMetadata } from '../agents/agent-resolver.js';
 
 const ZONES = {
@@ -93,6 +95,119 @@ function relPath(cwd, file) {
   return path.isAbsolute(file) ? path.relative(cwd, file) : file;
 }
 
+function toPosix(value) {
+  return String(value || '').replaceAll(path.sep, '/').replace(/^\.?\//, '');
+}
+
+function fileExists(cwd, rel) {
+  return fs.existsSync(path.join(cwd, rel));
+}
+
+function readJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function rootPackage(cwd) {
+  return readJson(path.join(cwd, 'package.json')) || {};
+}
+
+function hasDependency(cwd, dependency) {
+  let pkg = rootPackage(cwd);
+  let sections = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+  return sections.some(section => Object.hasOwn(pkg[section] || {}, dependency));
+}
+
+function globSignalMatches(pattern, files, cwd) {
+  let normalized = toPosix(pattern);
+  let normalizedFiles = files.map(toPosix);
+
+  if (!normalized.includes('*')) {
+    return fileExists(cwd, normalized) || normalizedFiles.some(file => file === normalized || file.startsWith(`${normalized}/`));
+  }
+
+  if (normalized.startsWith('**/*.')) {
+    let suffix = normalized.slice('**/*'.length);
+    return normalizedFiles.some(file => file.endsWith(suffix));
+  }
+
+  let [prefix] = normalized.split('*');
+  prefix = prefix.replace(/\/$/, '');
+  if (prefix && normalizedFiles.some(file => file.startsWith(prefix))) return true;
+  return false;
+}
+
+function contextIsActive(context, files, cwd) {
+  if (context.scope === 'global') return true;
+  let activation = context.activation || {};
+  let anyFiles = activation.anyFiles || [];
+  let anyPaths = activation.anyPaths || [];
+  let anyDependencies = activation.anyDependencies || [];
+
+  return anyFiles.some(signal => globSignalMatches(signal, files, cwd))
+    || anyPaths.some(signal => globSignalMatches(signal, files, cwd))
+    || anyDependencies.some(dep => hasDependency(cwd, dep));
+}
+
+function scanMarkdownFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  let files = [];
+  for (let entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) continue;
+    let fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...scanMarkdownFiles(fullPath));
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+function skillNameFromRef(ref) {
+  let value = String(ref || '');
+  if (value.startsWith('skills/')) return path.basename(value, '.md');
+  return value && !value.includes('/') ? value : null;
+}
+
+function workflowIdFromRef(ref) {
+  let value = String(ref || '');
+  if (!value.startsWith('workflows/')) return null;
+  return value.replace(/\.md$/, '');
+}
+
+function resolveActiveContexts(cwd, files) {
+  let contextsDir = path.join(cwd, '.agent-portal', 'contexts');
+  let scopeRank = { global: 0, provider: 1, project: 2 };
+  return scanMarkdownFiles(contextsDir)
+    .map(filePath => {
+      let rel = toPosix(path.relative(path.join(cwd, '.agent-portal'), filePath));
+      let { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, 'utf8'));
+      return {
+        id: frontmatter.id || path.basename(filePath, '.md'),
+        scope: frontmatter.scope || 'project',
+        path: rel,
+        activation: frontmatter.activation || null,
+        relatedSkills: frontmatter.related_skills || frontmatter.relatedSkills || [],
+        relatedWorkflows: frontmatter.related_workflows || frontmatter.relatedWorkflows || [],
+        providerContracts: frontmatter.provider_contracts || frontmatter.providerContracts || [],
+      };
+    })
+    .filter(context => contextIsActive(context, files, cwd))
+    .sort((a, b) => (scopeRank[a.scope] ?? 3) - (scopeRank[b.scope] ?? 3) || a.id.localeCompare(b.id))
+    .map(context => ({
+      id: context.id,
+      scope: context.scope,
+      path: context.path,
+      skills: context.relatedSkills.map(skillNameFromRef).filter(Boolean),
+      workflows: context.relatedWorkflows.map(workflowIdFromRef).filter(Boolean),
+      providerContracts: context.providerContracts || [],
+    }));
+}
+
 function scoreZone(zone, prompt, files) {
   let score = 0;
   for (let keyword of zone.keywords) {
@@ -126,13 +241,15 @@ function tagsForZones(zones, agent) {
   ]);
 }
 
-function matchSkills(cwd, tags, limit) {
+function matchSkills(cwd, tags, limit, contextSkillNames = []) {
   let tagSet = new Set(tags.map(normalizeText));
+  let contextSkillSet = new Set(contextSkillNames);
   return listSkills(cwd)
     .filter(skill => skill.category !== 'agents')
     .map(skill => {
       let skillTags = skill.tags?.length ? skill.tags : [skill.category];
       let score = skillTags.reduce((sum, tag) => sum + (tagSet.has(normalizeText(tag)) ? 1 : 0), 0);
+      if (contextSkillSet.has(skill.name)) score += 5;
       return { skill, score };
     })
     .filter(item => item.score > 0 || item.skill.autoload === true)
@@ -172,6 +289,22 @@ function matchWorkflows(cwd, tags, limit) {
   }
 
   return matched.slice(0, limit);
+}
+
+function contextWorkflowMatches(cwd, workflowIds) {
+  if (!workflowIds.length) return [];
+  let workflowsDir = path.join(cwd, '.agent-portal', 'workflows');
+  let { nodes } = buildTagIndex(workflowsDir);
+  return workflowIds
+    .map(id => nodes.get(id))
+    .filter(Boolean)
+    .map(node => ({
+      id: node.id,
+      name: node.meta.name || node.id,
+      description: node.meta.description || '',
+      tags: node.meta.tags || [],
+      group: node.meta.group || '',
+    }));
 }
 
 function chooseToolProfile(zones, agent) {
@@ -258,11 +391,17 @@ export function resolveContext(args = {}, defaultCwd = process.cwd()) {
   let task = args.task || args.prompt || '';
   let agent = args.agent_slug ? resolveAgentMetadata(cwd, args.agent_slug) : null;
   let files = Array.isArray(args.files) ? args.files : [];
+  let activeContexts = resolveActiveContexts(cwd, files);
+  let contextSkillNames = uniq(activeContexts.flatMap(context => context.skills || []));
+  let contextWorkflowIds = uniq(activeContexts.flatMap(context => context.workflows || []));
   let zones = inferZones({ cwd, prompt: task, files, agent });
   let tags = tagsForZones(zones, agent);
   let toolProfile = chooseToolProfile(zones, agent);
-  let skills = matchSkills(cwd, tags, args.max_skills || 8);
-  let workflows = matchWorkflows(cwd, tags, args.max_workflows || 8);
+  let skills = matchSkills(cwd, tags, args.max_skills || 8, contextSkillNames);
+  let workflows = uniq([
+    ...contextWorkflowMatches(cwd, contextWorkflowIds),
+    ...matchWorkflows(cwd, tags, args.max_workflows || 8),
+  ].map(workflow => JSON.stringify(workflow))).map(workflow => JSON.parse(workflow)).slice(0, args.max_workflows || 8);
   let items = buildContextItems({ cwd, skills, workflows, files });
   let mode = args.mode || 'plan';
 
@@ -274,10 +413,12 @@ export function resolveContext(args = {}, defaultCwd = process.cwd()) {
     tools: PROFILE_TOOLS[toolProfile] || PROFILE_TOOLS.implementation,
     skills,
     workflows,
+    contexts: activeContexts,
     contextPolicy: {
-      startup: 'index-only',
+      startup: 'metadata-only',
       loadFullSkillWith: 'get_skill_content',
       loadFullWorkflowWith: 'get_workflow_content',
+      scanContextMetadataFrom: '.agent-portal/contexts/**/*.md',
       atomicItems: 'Use items[] with loadWith/args to enrich one skill, workflow, or file-context at a time.',
     },
     notes: [

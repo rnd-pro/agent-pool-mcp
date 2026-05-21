@@ -534,6 +534,10 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
       console.error(`[agent-pool] Resolved agent '${args.agent_slug}': ${agentDef.skills.length} skills, policy=${agentDef.policy}`);
     } else {
       console.error(`[agent-pool] Agent '${args.agent_slug}' not found in ${cwd}/.agent-portal/agents/`);
+      return {
+        content: [{ type: 'text', text: `❌ Agent '${args.agent_slug}' could not be resolved. Check .agent-portal/agents/${args.agent_slug}.md and its skill references.` }],
+        isError: true,
+      };
     }
   }
 

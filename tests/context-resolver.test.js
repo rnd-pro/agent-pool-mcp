@@ -100,6 +100,26 @@ describe('context resolver', () => {
     assert.ok(!result.items.some(item => item.content));
   });
 
+  it('applies markdown context metadata before tag-only matching', async () => {
+    let { resolveContext } = await import('../src/tools/context-resolver.js');
+
+    let result = resolveContext({
+      cwd: PORTAL_ROOT,
+      task: 'Audit how Agent Portal uses Symbiote provider skills',
+      agent_slug: 'code-reviewer',
+      files: ['packages/symbiote-node/tree/TreeView/TreeView.js'],
+      max_skills: 12,
+      max_workflows: 8,
+    });
+
+    assert.ok(result.contexts.some(context => context.id === 'global-core'));
+    assert.ok(result.contexts.some(context => context.id === 'symbiote'));
+    assert.ok(result.contexts.some(context => context.id === 'agent-portal-family'));
+    assert.ok(result.skills.some(skill => skill.name === 'symbiote-patterns'));
+    assert.ok(result.skills.some(skill => skill.name === 'ui-theming'));
+    assert.ok(result.contextPolicy.scanContextMetadataFrom);
+  });
+
   it('loads a single skill content atomically', async () => {
     let { getSkillContent } = await import('../src/tools/skills.js');
 
