@@ -651,7 +651,8 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
 
   // ── Model validation ──────────────────────────────────────
   // Catch model typos before spawning a CLI process.
-  // Show resource-group models as preferred, then CLI-discovered as full list.
+  // Instead of blocking, fall back to default and warn with available models.
+  let modelWarning = '';
   const effectiveModel = taskOpts.model;
   if (effectiveModel && _cachedModels.length > 0) {
     const knownIds = _cachedModels.map(m => typeof m === 'string' ? m : m.id);
@@ -675,15 +676,13 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
         }
       } catch { /* groups may not exist */ }
 
-      const sample = knownIds.slice(0, 20).join('\n  - ');
-      const suffix = knownIds.length > 20 ? `\n  ... and ${knownIds.length - 20} more` : '';
-      return {
-        content: [{
-          type: 'text',
-          text: `❌ Unknown model: "${effectiveModel}"\n${preferredSection}\nAll available models:\n  - ${sample}${suffix}\n\nLeave \`model\` empty to use the default, or double-check the exact model ID.`,
-        }],
-        isError: true,
-      };
+      const sample = knownIds.slice(0, 15).join('\n  - ');
+      const suffix = knownIds.length > 15 ? `\n  ... and ${knownIds.length - 15} more` : '';
+
+      modelWarning = `\n\n⚠️ **Unknown model**: "${effectiveModel}" — running on **default** model instead.\n${preferredSection}\nAvailable models:\n  - ${sample}${suffix}\n\nNext time leave \`model\` empty or use an exact ID from the list above.`;
+
+      console.error(`[agent-pool] Unknown model "${effectiveModel}", falling back to default`);
+      taskOpts.model = null;
     }
   }
 
@@ -741,7 +740,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   return {
     content: [{
       type: 'text',
-      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${preview(args.prompt, 100)}...${loadInfo}\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${preview(args.prompt, 100)}...${loadInfo}${modelWarning}\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
