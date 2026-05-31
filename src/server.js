@@ -649,6 +649,44 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   }
   if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
 
+  // ── Model validation ──────────────────────────────────────
+  // Catch model typos before spawning a CLI process.
+  // Show resource-group models as preferred, then CLI-discovered as full list.
+  const effectiveModel = taskOpts.model;
+  if (effectiveModel && _cachedModels.length > 0) {
+    const knownIds = _cachedModels.map(m => typeof m === 'string' ? m : m.id);
+    const isKnown = knownIds.some(id => id === effectiveModel);
+    if (!isKnown) {
+      // Collect preferred models from resource groups
+      let preferredSection = '';
+      try {
+        const groups = listGroups(cwd);
+        const preferredModels = new Set();
+        for (const g of groups) {
+          if (g.model) preferredModels.add(`${g.model}  (group: ${g.name})`);
+          if (Array.isArray(g.profiles)) {
+            for (const p of g.profiles) {
+              if (p.model) preferredModels.add(`${p.model}  (group: ${g.name}, provider: ${p.provider || g.provider || 'default'})`);
+            }
+          }
+        }
+        if (preferredModels.size > 0) {
+          preferredSection = `\n⭐ **Preferred models** (from resource groups):\n  - ${[...preferredModels].join('\n  - ')}\n`;
+        }
+      } catch { /* groups may not exist */ }
+
+      const sample = knownIds.slice(0, 20).join('\n  - ');
+      const suffix = knownIds.length > 20 ? `\n  ... and ${knownIds.length - 20} more` : '';
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Unknown model: "${effectiveModel}"\n${preferredSection}\nAll available models:\n  - ${sample}${suffix}\n\nLeave \`model\` empty to use the default, or double-check the exact model ID.`,
+        }],
+        isError: true,
+      };
+    }
+  }
+
   createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd,
     agentDef?.slug ?? args.agent_slug ?? 'unknown',
     args.parent_chat_id, args.chat_id,
