@@ -19,9 +19,9 @@ async function resolve() {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   
   try {
-    const { buildTagIndex, searchByTags } = await import(join(__dirname, '../tools/workflow-index.js'));
-    const workflowsDir = join(process.cwd(), '.agent-portal', 'workflows');
-    const { nodes, tagIndex } = buildTagIndex(workflowsDir);
+    const { buildTagIndexForDirs, searchByTags } = await import(join(__dirname, '../tools/workflow-index.js'));
+    const { getWorkflowDirs } = await import(join(__dirname, '../tools/memory-layout.js'));
+    const { nodes, tagIndex } = buildTagIndexForDirs(getWorkflowDirs(process.cwd()));
 
     const { getTrackedFiles } = await import(join(__dirname, '../tools/file-tracker.js'));
     const cwd = process.cwd();

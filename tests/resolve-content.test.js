@@ -77,13 +77,13 @@ description: "Formulate a hypothesis."
   });
 
   it('resolves by nodeId and returns body', () => {
-    const out = runResolve({ nodeId: '03-hypothesize' });
+    const out = runResolve({ nodeId: 'debug_protocol/03-hypothesize' });
     assert.ok(out.includes('# Step 3: Formulate Hypothesis'));
   });
 
   it('passes variables while resolving workflow content', () => {
     const out = runResolve({ 
-      nodeId: '01-reproduce', 
+      nodeId: 'debug_protocol/01-reproduce',
       variables: { test_var: 'HELLO_WORLD' } 
     });
     // Just verify it resolved without error, we can't easily test substitution if the target markdown doesn't have the variable.
@@ -93,8 +93,8 @@ description: "Formulate a hypothesis."
   it('handles multiple matches by returning a list', () => {
     const out = runResolve({ tags: ['debug'] });
     assert.ok(out.includes('MULTIPLE MATCHES FOUND'));
-    assert.ok(out.includes('- 01-reproduce'));
-    assert.ok(out.includes('- 03-hypothesize'));
+    assert.ok(out.includes('- debug_protocol/01-reproduce'));
+    assert.ok(out.includes('- debug_protocol/03-hypothesize'));
   });
 
   it('handles no matches', () => {

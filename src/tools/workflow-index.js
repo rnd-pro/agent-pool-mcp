@@ -40,22 +40,26 @@ export function parseFrontmatter(content) {
  * Recursively scans for .md files with frontmatter.
  *
  * @param {string} dir - Directory to scan
+ * @param {{idPrefix?: string, relativeIds?: boolean}} [options]
  * @returns {{ nodes: Map<string, WorkflowNode>, tagIndex: Map<string, string[]> }}
  */
-export function buildTagIndex(dir) {
+export function buildTagIndex(dir, options = {}) {
   /** @type {Map<string, WorkflowNode>} */
   const nodes = new Map();
   /** @type {Map<string, string[]>} inverted index: tag → [nodeId, ...] */
   const tagIndex = new Map();
 
-  const files = walkMdFiles(dir);
+  const files = walkMdFiles(dir, [], new Set(options.skipTopLevelDirs || []), dir);
 
   for (const filePath of files) {
     const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = parseFrontmatter(content);
     if (!parsed || !parsed.meta) continue;
 
-    const id = path.basename(filePath, '.md');
+    let id = options.relativeIds
+      ? path.relative(dir, filePath).replace(/\.md$/, '').replaceAll(path.sep, '/')
+      : path.basename(filePath, '.md');
+    if (options.idPrefix) id = `${options.idPrefix}/${id}`;
     const node = { id, filePath, meta: parsed.meta, body: parsed.body };
     nodes.set(id, node);
 
@@ -66,6 +70,37 @@ export function buildTagIndex(dir) {
         if (!tagIndex.has(tag)) tagIndex.set(tag, []);
         tagIndex.get(tag).push(id);
       }
+    }
+  }
+
+  return { nodes, tagIndex };
+}
+
+/**
+ * Build one workflow index from several workflow roots.
+ *
+ * @param {Array<{dir: string, idPrefix?: string}>} dirs
+ * @returns {{ nodes: Map<string, WorkflowNode>, tagIndex: Map<string, string[]> }}
+ */
+export function buildTagIndexForDirs(dirs) {
+  /** @type {Map<string, WorkflowNode>} */
+  let nodes = new Map();
+  /** @type {Map<string, string[]>} */
+  let tagIndex = new Map();
+
+  for (let source of dirs) {
+    let index = buildTagIndex(source.dir, {
+      idPrefix: source.idPrefix || '',
+      relativeIds: true,
+      skipTopLevelDirs: source.scope === 'global' ? ['workspace'] : [],
+    });
+    for (let [id, node] of index.nodes) {
+      if (nodes.has(id)) throw new Error(`Duplicate workflow id: ${id}`);
+      nodes.set(id, node);
+    }
+    for (let [tag, ids] of index.tagIndex) {
+      if (!tagIndex.has(tag)) tagIndex.set(tag, []);
+      tagIndex.get(tag).push(...ids);
     }
   }
 
@@ -120,14 +155,15 @@ export function toLightList(matchedNodes) {
  * @param {string[]} [fileList]
  * @returns {string[]}
  */
-function walkMdFiles(dir, fileList = []) {
+function walkMdFiles(dir, fileList = [], skipTopLevelDirs = new Set(), rootDir = dir) {
   if (!fs.existsSync(dir)) return fileList;
   const entries = fs.readdirSync(dir);
   for (const entry of entries) {
     if (entry === '.git' || entry === 'node_modules') continue;
+    if (dir === rootDir && skipTopLevelDirs.has(entry)) continue;
     const fullPath = path.join(dir, entry);
     if (fs.statSync(fullPath).isDirectory()) {
-      walkMdFiles(fullPath, fileList);
+      walkMdFiles(fullPath, fileList, skipTopLevelDirs, rootDir);
     } else if (entry.endsWith('.md')) {
       fileList.push(fullPath);
     }

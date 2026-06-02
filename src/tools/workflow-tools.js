@@ -7,7 +7,8 @@
 import path from 'node:path';
 
 import { getTrackedFiles } from './file-tracker.js';
-import { buildTagIndex, searchByTags, toLightList } from './workflow-index.js';
+import { getWorkflowDirs } from './memory-layout.js';
+import { buildTagIndexForDirs, searchByTags, toLightList } from './workflow-index.js';
 
 /**
  * @param {object} args
@@ -15,7 +16,7 @@ import { buildTagIndex, searchByTags, toLightList } from './workflow-index.js';
  * @returns {string}
  */
 function getWorkflowsDir(args = {}, defaultCwd = process.cwd()) {
-  return path.join(args.cwd || defaultCwd, '.agent-portal', 'workflows');
+  return path.join(args.cwd || defaultCwd, '.agent-portal');
 }
 
 /**
@@ -24,7 +25,7 @@ function getWorkflowsDir(args = {}, defaultCwd = process.cwd()) {
  * @returns {{nodes: Map<string, object>, tagIndex: Map<string, string[]>}}
  */
 function getWorkflowIndex(args = {}, defaultCwd = process.cwd()) {
-  return buildTagIndex(getWorkflowsDir(args, defaultCwd));
+  return buildTagIndexForDirs(getWorkflowDirs(args.cwd || defaultCwd, args.files || []));
 }
 
 /**
@@ -53,7 +54,7 @@ export function handleListWorkflows(args = {}, defaultCwd = process.cwd()) {
   for (const node of nodes.values()) {
     let rel = path.relative(getWorkflowsDir(args, defaultCwd), node.filePath);
     let parts = rel.split(path.sep);
-    let groupName = parts.length > 1 ? parts[0] : node.id;
+    let groupName = parts[0] === 'workspace' && parts[1] ? parts[1] : parts[1] || node.id;
     if (!groups.has(groupName)) {
       groups.set(groupName, {
         name: groupName,
@@ -70,7 +71,7 @@ export function handleListWorkflows(args = {}, defaultCwd = process.cwd()) {
       tags: node.meta.tags || [],
       group: node.meta.group || '',
     });
-    if (!group.entryPoint || node.meta.entryPoint === true || node.id.startsWith('01-')) {
+    if (!group.entryPoint || node.meta.entryPoint === true || path.basename(node.id).startsWith('01-')) {
       group.entryPoint = node.id;
     }
     if (!group.description && node.meta.description) {

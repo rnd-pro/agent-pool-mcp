@@ -35,6 +35,8 @@ import { resolveAgent, buildAgentCatalog } from './agents/agent-resolver.js';
 import { trackFiles, untrackFiles } from './tools/file-tracker.js';
 import { handleGetTrackedFiles, handleListWorkflows, handleSearchByTags, handleGetWorkflowContent } from './tools/workflow-tools.js';
 import { handleResolveContext } from './tools/context-resolver.js';
+import { buildResolvedContextPackage } from './tools/context-package.js';
+import { buildDelegatePrompt } from './tools/delegate-prompt.js';
 import { createToolRouter } from './tools/toolRouter.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
@@ -56,6 +58,11 @@ function isNonEmptyString(value) {
 
 function preview(value, limit) {
   return typeof value === 'string' ? value.substring(0, limit) : '';
+}
+
+function normalizeFileHints(files) {
+  if (!Array.isArray(files)) return [];
+  return [...new Set(files.map(file => String(file || '').trim()).filter(Boolean))];
 }
 
 function isBlockedWorkspacePath(config, dir) {
@@ -569,13 +576,13 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     }
   }
 
-  // Legacy skill activation (fallback when no agent_slug)
+  // Direct skill activation when no agent_slug is provided.
   if (!agentContext && args.skill) {
     const provisioned = provisionSkill(cwd, args.skill);
     if (provisioned) {
       prompt = `IMPORTANT: Before starting the task, activate the skill "${provisioned.name}" using the activate_skill tool. Then proceed with the task.\n\n${prompt}`;
     } else {
-      prompt = `NOTE: Skill '${args.skill}' was requested but not found in project skills. Proceed with the task.\n\n${prompt}`;
+      prompt = `NOTE: Skill '${args.skill}' was requested but not found in global or active workspace skills. Proceed with the task.\n\n${prompt}`;
     }
   }
 
@@ -613,13 +620,39 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   const workspaceDirs = scope.dirs;
   const scopeNotice = `[Workspace Scope] You have access to these directories:\n${workspaceDirs.map((d) => `  - ${d}`).join('\n')}\nIf you need files outside these paths, use shell commands (cat, find, ls) instead of file tools. Do NOT attempt list_directory or read_file on paths outside your workspace — they will be rejected by the sandbox.`;
 
-  // Assemble final prompt: mode → scope → agent context → user task
-  let promptParts = [`[Agent Mode: ${resolvedMode.toUpperCase()}] ${modeNotice}`, scopeNotice];
-  if (agentContext) {
-    promptParts.push(`[Agent Context]\n${agentContext}\n[/Agent Context]`);
+  const contextMode = args.context_mode === 'off' ? 'off' : 'auto';
+  const fileHints = normalizeFileHints(args.files);
+  let resolvedContextPackage = '';
+  if (contextMode === 'auto') {
+    try {
+      resolvedContextPackage = buildResolvedContextPackage({
+        cwd,
+        task: args.prompt,
+        prompt: args.prompt,
+        agent_slug: args.agent_slug || agentDef?.slug || null,
+        files: fileHints,
+      }, defaultCwd).text;
+    } catch (err) {
+      resolvedContextPackage = [
+        '[Resolved Context Package]',
+        'Source: Agent Portal metadata resolver',
+        'Mode: orchestration',
+        'Status: unavailable',
+        `Error: ${err.message || 'context resolver failed'}`,
+        'Instruction: report missing context and call resolve_context or `mcp-agent-portal context resolve` when available. Shell inspection is emergency-only and must inspect frontmatter only.',
+        '[/Resolved Context Package]',
+      ].join('\n');
+    }
   }
-  promptParts.push(prompt);
-  prompt = promptParts.join('\n\n');
+
+  prompt = buildDelegatePrompt({
+    resolvedMode,
+    modeNotice,
+    scopeNotice,
+    resolvedContextPackage,
+    agentContext,
+    prompt,
+  });
 
   const taskOpts = {
     prompt,
@@ -696,6 +729,8 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
       model: taskOpts.model ?? null,
       runner: args.runner ?? null,
       skill: args.skill ?? null,
+      contextMode,
+      files: fileHints,
       sessionId: args.session_id ?? null,
     }
   );
@@ -783,7 +818,7 @@ async function handleListSessions(args) {
  * @returns {object}
  */
 function handleListSkills(args) {
-  const skills = listSkills(args.cwd ?? defaultCwd);
+  const skills = listSkills(args.cwd ?? defaultCwd, { files: args.files || [] });
   if (args.json) { return { content: [{ type: "text", text: JSON.stringify(skills) }] }; }
   
   if (skills.length === 0) {
@@ -807,7 +842,7 @@ function handleGetSkillContent(args) {
     return { content: [{ type: 'text', text: 'Missing skill name. Use `name`.' }], isError: true };
   }
 
-  const skill = getSkillContent(args.cwd ?? defaultCwd, skillName);
+  const skill = getSkillContent(args.cwd ?? defaultCwd, skillName, { files: args.files || [] });
   if (!skill) {
     return { content: [{ type: 'text', text: `Skill not found: ${skillName}` }], isError: true };
   }
@@ -1304,6 +1339,8 @@ function handleDelegateToGroup(args) {
       approval_mode: args.approval_mode,
       agent_slug: args.agent_slug,
       system_prompt: args.system_prompt,
+      context_mode: args.context_mode,
+      files: args.files,
       chat_id: args.chat_id,
       parent_chat_id: args.parent_chat_id,
       session_id: args.session_id,

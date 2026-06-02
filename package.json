@@ -9,6 +9,7 @@
   },
   "files": [
     "index.js",
+    "context.js",
     "src/",
     "policies/",
     "skills/",

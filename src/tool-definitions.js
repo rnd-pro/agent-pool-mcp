@@ -18,6 +18,27 @@ function modelDescription(models) {
   return `Model to use. Available: ${sample}${suffix}. Leave empty for default.`;
 }
 
+const DELEGATE_CONTEXT_PROPERTIES = {
+  context_mode: {
+    type: 'string',
+    enum: ['auto', 'off'],
+    description: 'Context package mode for delegated agents. auto injects the metadata-first resolved context package. off disables injection. Default: auto.',
+  },
+  files: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Known relevant file paths used as structured focus hints for context resolution. May include paths attached in the UI.',
+  },
+};
+
+const CONTEXT_FILE_HINT_PROPERTY = {
+  files: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Known relevant file paths used to activate workspace context when loading this item.',
+  },
+};
+
 /**
  * Generate tool definitions with dynamic model context.
  * @param {object} [ctx]
@@ -74,7 +95,7 @@ export function getToolDefinitions(ctx = {}) {
         },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
         session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Gemini, Codex, OpenCode, and Claude Code where available. Use list_sessions for Gemini sessions.' },
-        skill: { type: 'string', description: 'Activate a project skill by name before executing the task. Use list_skills to see available skills.' },
+        skill: { type: 'string', description: 'Activate a global or active workspace skill by name before executing the task. Use list_skills to see available skills.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         policy: { type: 'string', description: 'Policy file for tool restrictions. Use built-in template name (e.g. "read-only", "safe-edit") or absolute path to .yaml policy file.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results. Guides the calling agent on what to do while waiting.' },
@@ -82,6 +103,7 @@ export function getToolDefinitions(ctx = {}) {
         agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "backend-engineer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md with composed skills. Takes priority over legacy "skill" parameter.' },
         resource_group: { type: 'string', description: 'Resource group from local portal configuration. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution. Used by portal for portal-level agent injection.' },
+        ...DELEGATE_CONTEXT_PROPERTIES,
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'Chat ID to bind this task to in the UI. Optional.' },
       },
@@ -116,6 +138,7 @@ export function getToolDefinitions(ctx = {}) {
         agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "code-reviewer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md.' },
         resource_group: { type: 'string', description: 'Resource group from local portal configuration. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution.' },
+        ...DELEGATE_CONTEXT_PROPERTIES,
         parent_chat_id: { type: 'string', description: 'The parent chat or task ID that initiated this delegation. Used for hierarchy. Optional.' },
         chat_id: { type: 'string', description: 'The chat ID created for this task via create_chat. Optional.' },
       },
@@ -219,37 +242,39 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'list_skills',
-    description: 'List available CLI skills from the project .agent-portal/skills/ directory. Skills are markdown files with YAML frontmatter.',
+    description: 'List global CLI skills plus skills from the active .agent-portal/workspace/<project>/skills directory.',
     inputSchema: {
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        ...CONTEXT_FILE_HINT_PROPERTY,
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
     },
   },
   {
     name: 'get_skill_content',
-    description: 'Return one project skill with metadata and markdown content. Use after resolve_context returns a skill item that needs atomic loading.',
+    description: 'Return one global or active workspace skill with metadata and markdown content. Use after resolve_context returns a skill item that needs atomic loading.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Skill name returned by list_skills or resolve_context items.' },
         skill_name: { type: 'string', description: 'Alias for name.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+        ...CONTEXT_FILE_HINT_PROPERTY,
       },
     },
   },
   {
     name: 'create_skill',
-    description: 'Create or update a project CLI skill. Writes a .md file with YAML frontmatter under .agent-portal/skills/ in the current project.',
+    description: 'Create or update an active workspace CLI skill under .agent-portal/workspace/<project>/skills/.',
     inputSchema: {
       type: 'object',
       properties: {
         skill_name: { type: 'string', description: 'Skill name (used as filename, e.g. "code-reviewer").' },
         description: { type: 'string', description: 'Short description of what the skill does.' },
         instructions: { type: 'string', description: 'Full markdown instructions for the skill. Define the agent role, rules, and output format.' },
-        scope: { type: 'string', enum: ['project'], description: 'Only "project" is currently supported; skills are saved under .agent-portal/skills/.' },
+        scope: { type: 'string', enum: ['project'], description: 'Only "project" is currently supported; skills are saved under the active workspace.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },
@@ -258,7 +283,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'delete_skill',
-    description: 'Delete a project CLI skill by name from .agent-portal/skills/.',
+    description: 'Delete an active workspace CLI skill by name from .agent-portal/workspace/<project>/skills/.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -272,7 +297,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'install_skill',
-    description: 'Reserved for future external skill installation. Project skills are managed in .agent-portal/skills/ or through the Agent Portal UI.',
+    description: 'Reserved for future external skill installation. Workspace skills are managed in .agent-portal/workspace/<project>/skills/ or through the Agent Portal UI.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -531,6 +556,7 @@ export function getToolDefinitions(ctx = {}) {
         parent_chat_id: { type: 'string', description: 'Parent chat ID used to create/bind child task chats.' },
         session_id: { type: 'string', description: 'Provider session/thread ID passed through for resumed tasks.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Scope directories override for child tasks. Default: group include_dirs.' },
+        ...DELEGATE_CONTEXT_PROPERTIES,
         on_wait_hint: { type: 'string', description: 'Optional wait hint shown while the task runs.' },
         count: { type: 'number', description: 'Number of agents to spawn. Default: 1.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
@@ -643,11 +669,12 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'list_workflows',
-    description: 'List workflows from .agent-portal/workflows grouped by workflow directory.',
+    description: 'List global workflows plus workflows from the active .agent-portal/workspace/<project>/workflows directory.',
     inputSchema: {
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+        ...CONTEXT_FILE_HINT_PROPERTY,
       },
     },
   },
@@ -659,6 +686,7 @@ export function getToolDefinitions(ctx = {}) {
       properties: {
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags to match with AND semantics.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+        ...CONTEXT_FILE_HINT_PROPERTY,
       },
       required: ['tags'],
     },
@@ -669,8 +697,9 @@ export function getToolDefinitions(ctx = {}) {
     inputSchema: {
       type: 'object',
       properties: {
-        nodeId: { type: 'string', description: 'Workflow step node id, usually the markdown filename without extension.' },
+        nodeId: { type: 'string', description: 'Workflow node id, usually a path relative to workflows without .md, optionally prefixed by workspace name.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
+        ...CONTEXT_FILE_HINT_PROPERTY,
       },
       required: ['nodeId'],
     },

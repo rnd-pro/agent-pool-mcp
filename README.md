@@ -65,11 +65,12 @@ Schedule agents on a cron expression — a detached daemon survives IDE/CLI rest
 
 Results are saved to `.agent-portal/scheduled-results/` and retrievable via `get_scheduled_results`.
 
-### Project Skill System
+### Team Memory Skill System
 
 Skills are Markdown files with YAML frontmatter that extend agent behavior:
 
-- **Project** — `.agent-portal/skills/` inside the current repo.
+- **Global** — `.agent-portal/skills/` inside the team-memory submodule.
+- **Workspace** — `.agent-portal/workspace/<project>/skills/` when the project context activates.
 - Skills are loaded recursively and re-read by agent-pool on each run.
 - Use `create_skill`, edit files directly, or manage shared skills through the Agent Portal UI.
 

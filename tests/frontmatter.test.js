@@ -64,6 +64,37 @@ Skill body`);
     assert.equal(skill.autoload, false);
   });
 
+  it('lists skills from the active workspace context', () => {
+    const contextDir = path.join(TEST_CWD, '.agent-portal', 'workspace', 'demo');
+    const skillDir = path.join(contextDir, 'skills');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(TEST_CWD, 'package.json'), '{}');
+    fs.writeFileSync(path.join(contextDir, 'context.md'), `---
+id: demo
+scope: project
+activation:
+  anyFiles:
+    - package.json
+related_skills:
+  - workspace/demo/skills/demo-skill.md
+---
+# Demo Context`);
+    fs.writeFileSync(path.join(skillDir, 'demo-skill.md'), `---
+name: demo-skill
+description: Demo workspace skill
+category: workspace
+tags: [demo]
+---
+Skill body`);
+
+    const skills = listSkills(TEST_CWD);
+    const skill = skills.find(item => item.name === 'demo-skill');
+
+    assert.ok(skill);
+    assert.equal(skill.tier, 'workspace');
+    assert.equal(skill.workspace, 'demo');
+  });
+
   it('uses the shared parser for agent routing metadata', () => {
     const agentsDir = path.join(TEST_CWD, '.agent-portal', 'agents');
     fs.mkdirSync(agentsDir, { recursive: true });

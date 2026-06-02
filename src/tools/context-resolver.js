@@ -1,8 +1,7 @@
 import path from 'node:path';
-import fs from 'node:fs';
 import { listSkills } from './skills.js';
-import { buildTagIndex } from './workflow-index.js';
-import { parseFrontmatter } from './markdown-parser.js';
+import { getWorkflowDirs, resolveActiveContexts as resolveMemoryContexts } from './memory-layout.js';
+import { buildTagIndexForDirs } from './workflow-index.js';
 import { resolveAgentMetadata } from '../agents/agent-resolver.js';
 
 const ZONES = {
@@ -56,13 +55,20 @@ const ZONES = {
   },
   'context-system': {
     tags: ['context', 'skills', 'metadata', 'tooling'],
-    paths: [/\.agent-portal\/skills\//, /context-resolver\.js$/, /workflow-index\.js$/, /skills\.js$/],
+    paths: [
+      /\.agent-portal\/skills\//,
+      /\.agent-portal\/workspace\/[^/]+\/skills\//,
+      /\.agent-portal\/workspace\/[^/]+\/context\.md$/,
+      /context-resolver\.js$/,
+      /workflow-index\.js$/,
+      /skills\.js$/,
+    ],
     keywords: ['skills metadata', 'skill tags', 'context resolver', 'dynamic context', 'скилл', 'контекст', 'динамический контекст'],
     toolProfile: 'implementation',
   },
   'workflow-system': {
     tags: ['workflow', 'pipeline', 'process'],
-    paths: [/\.agent-portal\/workflows\//, /workflow/i, /pipeline/i],
+    paths: [/\.agent-portal\/workflows\//, /\.agent-portal\/workspace\/[^/]+\/workflows\//, /workflow/i, /pipeline/i],
     keywords: ['workflow', 'pipeline', 'flow', 'process', 'воркфлоу', 'пайплайн'],
     toolProfile: 'workflow',
   },
@@ -95,115 +101,29 @@ function relPath(cwd, file) {
   return path.isAbsolute(file) ? path.relative(cwd, file) : file;
 }
 
-function toPosix(value) {
-  return String(value || '').replaceAll(path.sep, '/').replace(/^\.?\//, '');
-}
-
-function fileExists(cwd, rel) {
-  return fs.existsSync(path.join(cwd, rel));
-}
-
-function readJson(filePath) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-function rootPackage(cwd) {
-  return readJson(path.join(cwd, 'package.json')) || {};
-}
-
-function hasDependency(cwd, dependency) {
-  let pkg = rootPackage(cwd);
-  let sections = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
-  return sections.some(section => Object.hasOwn(pkg[section] || {}, dependency));
-}
-
-function globSignalMatches(pattern, files, cwd) {
-  let normalized = toPosix(pattern);
-  let normalizedFiles = files.map(toPosix);
-
-  if (!normalized.includes('*')) {
-    return fileExists(cwd, normalized) || normalizedFiles.some(file => file === normalized || file.startsWith(`${normalized}/`));
-  }
-
-  if (normalized.startsWith('**/*.')) {
-    let suffix = normalized.slice('**/*'.length);
-    return normalizedFiles.some(file => file.endsWith(suffix));
-  }
-
-  let [prefix] = normalized.split('*');
-  prefix = prefix.replace(/\/$/, '');
-  if (prefix && normalizedFiles.some(file => file.startsWith(prefix))) return true;
-  return false;
-}
-
-function contextIsActive(context, files, cwd) {
-  if (context.scope === 'global') return true;
-  let activation = context.activation || {};
-  let anyFiles = activation.anyFiles || [];
-  let anyPaths = activation.anyPaths || [];
-  let anyDependencies = activation.anyDependencies || [];
-
-  return anyFiles.some(signal => globSignalMatches(signal, files, cwd))
-    || anyPaths.some(signal => globSignalMatches(signal, files, cwd))
-    || anyDependencies.some(dep => hasDependency(cwd, dep));
-}
-
-function scanMarkdownFiles(dir) {
-  if (!fs.existsSync(dir)) return [];
-  let files = [];
-  for (let entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
-    let fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...scanMarkdownFiles(fullPath));
-    } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      files.push(fullPath);
-    }
-  }
-  return files;
-}
-
 function skillNameFromRef(ref) {
   let value = String(ref || '');
-  if (value.startsWith('skills/')) return path.basename(value, '.md');
+  if (value.startsWith('skills/') || value.includes('/skills/')) return path.basename(value, '.md');
   return value && !value.includes('/') ? value : null;
 }
 
 function workflowIdFromRef(ref) {
   let value = String(ref || '');
+  let workspaceMatch = value.match(/^workspace\/([^/]+)\/workflows\/(.+)\.md$/);
+  if (workspaceMatch) return `${workspaceMatch[1]}/${workspaceMatch[2]}`;
   if (!value.startsWith('workflows/')) return null;
-  return value.replace(/\.md$/, '');
+  return value.replace(/^workflows\//, '').replace(/\.md$/, '');
 }
 
 function resolveActiveContexts(cwd, files) {
-  let contextsDir = path.join(cwd, '.agent-portal', 'contexts');
-  let scopeRank = { global: 0, provider: 1, project: 2 };
-  return scanMarkdownFiles(contextsDir)
-    .map(filePath => {
-      let rel = toPosix(path.relative(path.join(cwd, '.agent-portal'), filePath));
-      let { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, 'utf8'));
-      return {
-        id: frontmatter.id || path.basename(filePath, '.md'),
-        scope: frontmatter.scope || 'project',
-        path: rel,
-        activation: frontmatter.activation || null,
-        relatedSkills: frontmatter.related_skills || frontmatter.relatedSkills || [],
-        relatedWorkflows: frontmatter.related_workflows || frontmatter.relatedWorkflows || [],
-        providerContracts: frontmatter.provider_contracts || frontmatter.providerContracts || [],
-      };
-    })
-    .filter(context => contextIsActive(context, files, cwd))
-    .sort((a, b) => (scopeRank[a.scope] ?? 3) - (scopeRank[b.scope] ?? 3) || a.id.localeCompare(b.id))
+  return resolveMemoryContexts(cwd, files)
     .map(context => ({
       id: context.id,
       scope: context.scope,
       path: context.path,
-      skills: context.relatedSkills.map(skillNameFromRef).filter(Boolean),
-      workflows: context.relatedWorkflows.map(workflowIdFromRef).filter(Boolean),
+      workspace: context.workspace || null,
+      skills: context.skills.map(skillNameFromRef).filter(Boolean),
+      workflows: context.workflows.map(workflowIdFromRef).filter(Boolean),
       providerContracts: context.providerContracts || [],
     }));
 }
@@ -241,15 +161,15 @@ function tagsForZones(zones, agent) {
   ]);
 }
 
-function matchSkills(cwd, tags, limit, contextSkillNames = []) {
+function matchSkills(cwd, tags, limit, contextSkillNames = [], files = []) {
   let tagSet = new Set(tags.map(normalizeText));
   let contextSkillSet = new Set(contextSkillNames);
-  return listSkills(cwd)
+  return listSkills(cwd, { files })
     .filter(skill => skill.category !== 'agents')
     .map(skill => {
       let skillTags = skill.tags?.length ? skill.tags : [skill.category];
       let score = skillTags.reduce((sum, tag) => sum + (tagSet.has(normalizeText(tag)) ? 1 : 0), 0);
-      if (contextSkillSet.has(skill.name)) score += 5;
+      if (contextSkillSet.has(skill.name)) score += score > 0 ? 5 : 1;
       return { skill, score };
     })
     .filter(item => item.score > 0 || item.skill.autoload === true)
@@ -259,6 +179,8 @@ function matchSkills(cwd, tags, limit, contextSkillNames = []) {
       name: skill.name,
       description: skill.description,
       category: skill.category,
+      tier: skill.tier || null,
+      workspace: skill.workspace || null,
       tags: skill.tags || [],
       tokenCost: skill.tokenCost || null,
       autoload: skill.autoload,
@@ -266,9 +188,8 @@ function matchSkills(cwd, tags, limit, contextSkillNames = []) {
     }));
 }
 
-function matchWorkflows(cwd, tags, limit) {
-  let workflowsDir = path.join(cwd, '.agent-portal', 'workflows');
-  let { nodes, tagIndex } = buildTagIndex(workflowsDir);
+function matchWorkflows(cwd, tags, limit, files = []) {
+  let { nodes, tagIndex } = buildTagIndexForDirs(getWorkflowDirs(cwd, files));
   let matched = [];
   let seen = new Set();
 
@@ -291,10 +212,9 @@ function matchWorkflows(cwd, tags, limit) {
   return matched.slice(0, limit);
 }
 
-function contextWorkflowMatches(cwd, workflowIds) {
+function contextWorkflowMatches(cwd, workflowIds, files = []) {
   if (!workflowIds.length) return [];
-  let workflowsDir = path.join(cwd, '.agent-portal', 'workflows');
-  let { nodes } = buildTagIndex(workflowsDir);
+  let { nodes } = buildTagIndexForDirs(getWorkflowDirs(cwd, files));
   return workflowIds
     .map(id => nodes.get(id))
     .filter(Boolean)
@@ -337,7 +257,7 @@ function buildContextItems({ cwd, skills, workflows, files }) {
       tokenCost: skill.tokenCost || 'unknown',
       autoload: skill.autoload === true,
       loadWith: 'get_skill_content',
-      args: { name: skill.name, cwd },
+      args: { name: skill.name, cwd, files },
     });
   }
 
@@ -352,7 +272,7 @@ function buildContextItems({ cwd, skills, workflows, files }) {
       tokenCost: 'medium',
       autoload: false,
       loadWith: 'get_workflow_content',
-      args: { nodeId: workflow.id, cwd },
+      args: { nodeId: workflow.id, cwd, files },
     });
   }
 
@@ -397,10 +317,10 @@ export function resolveContext(args = {}, defaultCwd = process.cwd()) {
   let zones = inferZones({ cwd, prompt: task, files, agent });
   let tags = tagsForZones(zones, agent);
   let toolProfile = chooseToolProfile(zones, agent);
-  let skills = matchSkills(cwd, tags, args.max_skills || 8, contextSkillNames);
+  let skills = matchSkills(cwd, tags, args.max_skills || 8, contextSkillNames, files);
   let workflows = uniq([
-    ...contextWorkflowMatches(cwd, contextWorkflowIds),
-    ...matchWorkflows(cwd, tags, args.max_workflows || 8),
+    ...contextWorkflowMatches(cwd, contextWorkflowIds, files),
+    ...matchWorkflows(cwd, tags, args.max_workflows || 8, files),
   ].map(workflow => JSON.stringify(workflow))).map(workflow => JSON.parse(workflow)).slice(0, args.max_workflows || 8);
   let items = buildContextItems({ cwd, skills, workflows, files });
   let mode = args.mode || 'plan';
@@ -418,7 +338,7 @@ export function resolveContext(args = {}, defaultCwd = process.cwd()) {
       startup: 'metadata-only',
       loadFullSkillWith: 'get_skill_content',
       loadFullWorkflowWith: 'get_workflow_content',
-      scanContextMetadataFrom: '.agent-portal/contexts/**/*.md',
+      scanContextMetadataFrom: '.agent-portal/contexts/**/*.md + .agent-portal/workspace/*/context.md',
       atomicItems: 'Use items[] with loadWith/args to enrich one skill, workflow, or file-context at a time.',
     },
     notes: [

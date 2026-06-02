@@ -1,7 +1,8 @@
 /**
- * Skills management — project-level skill system for CLI agents.
+ * Skills management — team-global and active workspace skill system for CLI agents.
  *
- * Skills live in `.agent-portal/skills/` inside each project.
+ * Global skills live in `.agent-portal/skills/`.
+ * Project skills live in `.agent-portal/workspace/<project>/skills/`.
  * Managed as markdown files with YAML frontmatter.
  *
  * @module agent-pool/tools/skills
@@ -10,6 +11,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { parseFrontmatter } from './markdown-parser.js';
+import { getSkillDirs, getSingleActiveWorkspace, getWorkspaceSkillsDir } from './memory-layout.js';
 
 /**
  * Sanitize skill name to prevent path traversal.
@@ -31,30 +33,21 @@ function sanitizeSkillName(name) {
 }
 
 /**
- * Get the project-level skills directory.
- *
- * @param {string} cwd - Project root
- * @returns {string}
- */
-function getProjectSkillsDir(cwd) {
-  return path.join(cwd, '.agent-portal', 'skills');
-}
-
-
-/**
  * Read skills from a directory recursively.
  *
  * @param {string} dir - Skills directory
- * @param {string} tier - Tier label: 'project', 'global', 'built-in'
- * @returns {Array<{fileName: string, name: string, description: string, category: string, tags: string[], appliesTo: object|null, tokenCost: string|null, autoload: boolean|null, tier: string, filePath: string}>}
+ * @param {{tier: string, workspace: string|null}} source
+ * @returns {Array<{fileName: string, name: string, description: string, category: string, tags: string[], appliesTo: object|null, tokenCost: string|null, autoload: boolean|null, tier: string, workspace: string|null, filePath: string}>}
  */
-function readSkillsFromDir(dir, tier) {
+function readSkillsFromDir(dir, source) {
   if (!fs.existsSync(dir)) return [];
 
   const files = [];
   function scan(currentDir) {
+    const isRoot = currentDir === dir;
     for (const f of fs.readdirSync(currentDir)) {
       if (f.startsWith('.')) continue;
+      if (source.tier === 'global' && isRoot && f === 'workspace') continue;
       const fullPath = path.join(currentDir, f);
       if (fs.statSync(fullPath).isDirectory()) {
         scan(fullPath);
@@ -83,31 +76,34 @@ function readSkillsFromDir(dir, tier) {
       appliesTo: frontmatter.applies_to || frontmatter.appliesTo || null,
       tokenCost: frontmatter.token_cost || frontmatter.tokenCost || null,
       autoload: typeof frontmatter.autoload === 'boolean' ? frontmatter.autoload : null,
-      tier,
+      tier: source.tier,
+      workspace: source.workspace || null,
       filePath,
     };
   });
 }
 
 /**
- * List skills from the project's .agent-portal/skills/ directory.
+ * List global skills and active workspace skills.
  * Sorted by category then name.
  *
  * @param {string} cwd - Project root
- * @returns {Array<{fileName: string, name: string, description: string, category: string, tags: string[], appliesTo: object|null, tokenCost: string|null, autoload: boolean|null, tier: string, filePath: string}>}
+ * @param {{files?: string[]}} [options]
+ * @returns {Array<{fileName: string, name: string, description: string, category: string, tags: string[], appliesTo: object|null, tokenCost: string|null, autoload: boolean|null, tier: string, workspace: string|null, filePath: string}>}
  */
-export function listSkills(cwd) {
-  const project = readSkillsFromDir(getProjectSkillsDir(cwd), 'project');
-  const arr = [...project];
+export function listSkills(cwd, options = {}) {
+  const arr = getSkillDirs(cwd, options.files || [])
+    .flatMap(source => readSkillsFromDir(source.dir, source));
   arr.sort((a, b) => {
     if (a.category !== b.category) return a.category.localeCompare(b.category);
+    if (a.tier !== b.tier) return a.tier.localeCompare(b.tier);
     return a.name.localeCompare(b.name);
   });
   return arr;
 }
 
 /**
- * Find a project skill by name.
+ * Find a global or active workspace skill by name.
  *
  * @param {string} cwd - Project root
  * @param {string} skillName - Skill name (with or without .md)
@@ -133,11 +129,12 @@ export function findSkill(cwd, skillName) {
  *
  * @param {string} cwd - Project root
  * @param {string} skillName - Skill name (with or without .md)
+ * @param {{files?: string[]}} [options]
  * @returns {{ name: string, description: string, category: string, tags: string[], tokenCost: string|null, autoload: boolean|null, tier: string, fileName: string, content: string } | null}
  */
-export function getSkillContent(cwd, skillName) {
+export function getSkillContent(cwd, skillName, options = {}) {
   const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
-  const all = listSkills(cwd);
+  const all = listSkills(cwd, { files: options.files || [] });
   const match = all.find(s => s.name === targetName || s.fileName === skillName);
   if (!match) return null;
 
@@ -164,7 +161,8 @@ export function getSkillContent(cwd, skillName) {
  * @returns {string} Path to created file
  */
 export function createSkill(cwd, skillName, description, instructions) {
-  const targetDir = getProjectSkillsDir(cwd);
+  const workspace = getSingleActiveWorkspace(cwd);
+  const targetDir = getWorkspaceSkillsDir(cwd, workspace);
   fs.mkdirSync(targetDir, { recursive: true });
 
   const fileName = sanitizeSkillName(skillName.endsWith('.md') ? skillName : `${skillName}.md`);
@@ -174,6 +172,7 @@ export function createSkill(cwd, skillName, description, instructions) {
     '---',
     `name: ${skillName.replace('.md', '')}`,
     `description: ${description}`,
+    'category: workspace',
     '---',
     '',
     instructions,
@@ -194,7 +193,7 @@ export function createSkill(cwd, skillName, description, instructions) {
 export function deleteSkill(cwd, skillName) {
   const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
   const all = listSkills(cwd);
-  const match = all.find(s => s.name === targetName || s.fileName === skillName);
+  const match = all.find(s => s.tier === 'workspace' && (s.name === targetName || s.fileName === skillName));
   
   if (match && fs.existsSync(match.filePath)) {
     fs.unlinkSync(match.filePath);
@@ -205,7 +204,7 @@ export function deleteSkill(cwd, skillName) {
 
 /**
  * Provision a skill for a delegated task.
- * Checks that the skill exists in .agent-portal/skills/.
+ * Checks that the skill exists in global or active workspace skills.
  *
  * @param {string} cwd - Project root
  * @param {string} skillName - Skill name
@@ -213,11 +212,10 @@ export function deleteSkill(cwd, skillName) {
  */
 export function provisionSkill(cwd, skillName) {
   const targetName = skillName.endsWith('.md') ? skillName.replace('.md', '') : skillName;
-  
-  const project = readSkillsFromDir(getProjectSkillsDir(cwd), 'project');
-  const projectMatch = project.find(s => s.name === targetName || s.fileName === skillName);
-  if (projectMatch) {
-    return { name: projectMatch.name, provisioned: false, tier: 'project' };
+
+  const match = listSkills(cwd).find(s => s.name === targetName || s.fileName === skillName);
+  if (match) {
+    return { name: match.name, provisioned: false, tier: match.tier };
   }
 
   return null;
