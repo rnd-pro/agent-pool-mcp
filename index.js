@@ -9,7 +9,7 @@
  * @module agent-pool
  */
 
-import { handleCli, validateStartup } from './src/cli.js';
+import { handleCli, PACKAGE_JSON, validateStartup } from './src/cli.js';
 
 // CLI mode: --check, --init, --version, --help
 if (handleCli(process.argv)) {
@@ -33,13 +33,11 @@ async function startServer() {
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[agent-pool] MCP server v1.2.1 started');
+  console.error(`[agent-pool] MCP server v${PACKAGE_JSON.version} started`);
 
-  // Exit when parent IDE closes the stdin pipe (session ended)
   process.stdin.on('close', () => {
     console.error('[agent-pool] stdin pipe closed, exiting');
     process.exit(0);
   });
   process.on('SIGHUP', () => { process.exit(0); });
 }
-

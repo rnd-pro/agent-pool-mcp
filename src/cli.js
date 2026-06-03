@@ -12,7 +12,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { loadConfig } from './runner/config.js';
 
-const PACKAGE_JSON = JSON.parse(
+export const PACKAGE_JSON = JSON.parse(
   fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
 );
 
