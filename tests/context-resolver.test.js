@@ -60,7 +60,8 @@ id: symbiote
 scope: provider
 activation:
   anyFiles:
-    - packages/symbiote-node
+    - packages/symbiote-ui
+    - packages/symbiote-engine
 related_skills:
   - skills/ui/symbiote-components.md
   - skills/ui/symbiote-patterns.md
@@ -73,7 +74,8 @@ id: agent-portal-family
 scope: project
 activation:
   anyFiles:
-    - packages/symbiote-node
+    - packages/symbiote-ui
+    - packages/symbiote-engine
     - packages/agent-pool-mcp
 related_workflows:
   - workflows/code/context-routing.md
@@ -248,7 +250,7 @@ describe('context resolver', () => {
       cwd,
       task: 'Audit how Agent Portal uses Symbiote provider skills',
       agent_slug: 'code-reviewer',
-      files: ['packages/symbiote-node/tree/TreeView/TreeView.js'],
+      files: ['packages/symbiote-ui/tree/TreeView/TreeView.js'],
       max_skills: 12,
       max_workflows: 8,
     });
