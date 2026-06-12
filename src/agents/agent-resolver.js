@@ -118,15 +118,6 @@ function resolveSkills(body, skillNames, skillsDir) {
   return parts.join('\n\n---\n\n');
 }
 
-function approvalModeFromMeta(meta) {
-  const explicit = meta.approval_mode || meta.approvalMode || meta.access_mode || meta.accessMode;
-  if (explicit) return explicit;
-  if (meta.policy === 'read-only') return 'plan';
-  if (meta.policy === 'admin') return 'yolo';
-  if (meta.policy === 'read-write') return 'auto_edit';
-  return null;
-}
-
 function arrayFromMeta(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -140,7 +131,7 @@ function arrayFromMeta(value) {
  *
  * @param {string} cwd - Project root
  * @param {string} slug - Agent name (e.g. 'backend-engineer')
- * @returns {{ slug: string, description: string, role: string, resourceGroup: string|null, provider: string|null, model: string|null, models: string[], policy: string, approvalMode: string|null, contextTags: string[] } | null}
+ * @returns {{ slug: string, description: string, role: string, resourceGroup: string|null, provider: string|null, model: string|null, models: string[], contextTags: string[] } | null}
  */
 export function resolveAgentMetadata(cwd, slug) {
   if (!slug) return null;
@@ -165,8 +156,6 @@ export function resolveAgentMetadata(cwd, slug) {
       provider: meta.provider || null,
       model: meta.model || null,
       models: arrayFromMeta(meta.models),
-      policy: meta.policy || 'read-write',
-      approvalMode: approvalModeFromMeta(meta),
       contextTags: arrayFromMeta(meta.context_tags || meta.contextTags),
     };
   } catch (err) {
@@ -187,7 +176,7 @@ const AGENT_CACHE_TTL = 5000;
  * 
  * @param {string} cwd - Project root
  * @param {string} slug - Agent name (e.g. 'backend-engineer')
- * @returns {{ slug: string, prompt: string, resourceGroup: string, provider: string, model: string, models: string[], policy: string, timeout: number, icon: string, color: string, description: string, role: string } | null}
+ * @returns {{ slug: string, prompt: string, resourceGroup: string|null, provider: string|null, model: string|null, models: string[], icon: string, color: string, description: string, role: string, skills: string[] } | null}
  */
 export function resolveAgent(cwd, slug) {
   if (!slug) return null;
@@ -223,11 +212,7 @@ export function resolveAgent(cwd, slug) {
       provider: meta.provider || null,
       model: meta.model || null,
       models: arrayFromMeta(meta.models),
-      rotation: meta.rotation || 'on_error',
       skills: skillNames,
-      policy: meta.policy || 'read-write',
-      approvalMode: approvalModeFromMeta(meta),
-      timeout: meta.timeout || 600,
       prompt,
     };
 
@@ -259,16 +244,19 @@ export function listAgentSlugs(cwd) {
 }
 
 /**
- * Build a catalog summary of available agents for injection into orchestrator prompt.
+ * Build a catalog summary of available agents for injection into an agent prompt.
  * @param {string} cwd - Project root
+ * @param {{ excludeSlug?: string }} [options]
  * @returns {string} Formatted agent catalog
  */
-export function buildAgentCatalog(cwd) {
+export function buildAgentCatalog(cwd, options = {}) {
   const slugs = listAgentSlugs(cwd);
   if (slugs.length === 0) return '';
 
   const lines = [];
+  const excludeSlug = options.excludeSlug || null;
   for (const slug of slugs) {
+    if (slug === excludeSlug) continue;
     const def = resolveAgent(cwd, slug);
     if (def) {
       const groupInfo = def.resourceGroup ? `, group: ${def.resourceGroup}` : '';
@@ -276,5 +264,6 @@ export function buildAgentCatalog(cwd) {
     }
   }
 
+  if (!lines.length) return '';
   return `[Available Agents]\n${lines.join('\n')}`;
 }

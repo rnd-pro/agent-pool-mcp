@@ -51,15 +51,6 @@ export function resolveSkills(cwd, frontmatterSkills, body) {
   return assembledBody.trim();
 }
 
-function approvalModeFromFrontmatter(frontmatter) {
-  const explicit = frontmatter.approval_mode || frontmatter.approvalMode || frontmatter.access_mode || frontmatter.accessMode;
-  if (explicit) return explicit;
-  if (frontmatter.policy === 'read-only') return 'plan';
-  if (frontmatter.policy === 'admin') return 'yolo';
-  if (frontmatter.policy === 'read-write') return 'auto_edit';
-  return undefined;
-}
-
 /**
  * Load an agent entity, parsing its configuration and resolving its skills.
  *
@@ -96,14 +87,9 @@ export function loadAgent(cwd, agentSlug) {
     provider: frontmatter.provider,
     model: frontmatter.model,
     models: modelsArray.length > 0 ? modelsArray : undefined,
-    rotation: frontmatter.rotation,
     icon: frontmatter.icon,
     color: frontmatter.color,
-    policy: frontmatter.policy || 'read-write',
-    approvalMode: approvalModeFromFrontmatter(frontmatter),
     visibleAgents: Array.isArray(frontmatter.visibleAgents) ? frontmatter.visibleAgents : [],
-    max_concurrent: typeof frontmatter.max_concurrent === 'number' ? frontmatter.max_concurrent : undefined,
-    timeout: typeof frontmatter.timeout === 'number' ? frontmatter.timeout : undefined,
   };
 
   // Resolve skills and assemble the system prompt

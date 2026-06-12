@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdir
 import { spawn, execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { matchesCron } from './cron.js';
-import { getGroup, getGroupNextModel, getGroupNextProfile } from '../tools/groups.js';
+import { getGroup, getGroupNextProfile } from '../tools/groups.js';
 import { getRunner } from '../runner/config.js';
 import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
@@ -66,6 +66,14 @@ function providerGatewayEnv(provider) {
   return provider === 'claude' ? getClaudeGatewayEnv(null) : {};
 }
 
+const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+
+function normalizeCodexReasoningEffort(value) {
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized === 'default') return null;
+  return CODEX_REASONING_EFFORTS.has(normalized) ? normalized : null;
+}
+
 function buildCliArgs(provider, prompt, opts = {}) {
   const model = opts.model && opts.model !== 'default' ? opts.model : null;
   if (provider === 'gemini') {
@@ -94,6 +102,8 @@ function buildCliArgs(provider, prompt, opts = {}) {
     '-s', codexSandbox(opts.approvalMode),
   ];
   if (model) args.push('--model', model);
+  const reasoningEffort = normalizeCodexReasoningEffort(opts.reasoningEffort);
+  if (reasoningEffort) args.push('-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`);
   args.push(prompt);
   return args;
 }
@@ -391,10 +401,9 @@ function applySignals(run, signals, pipeline) {
  * @param {object} run - Current run state
  * @param {string} runId
  * @param {string} [bounceReason] - If bouncing back, the reason
- * @param {string} [fallbackModel] - Specific model to use for error fallback
  * @returns {number[]} Array of child PIDs
  */
-function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
+function spawnStep(stepDef, run, runId, bounceReason) {
   const count = stepDef.count || 1;
   const pids = [];
 
@@ -443,15 +452,12 @@ function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
     prompt = `[Pipeline: ${run.pipelineName}, Step: ${stepDef.name}, Run: ${runId}]\n\nTask:\n${prompt}\n\nWhen finished, call signal_step_complete with step_name "${stepDef.name}" and run_id "${runId}".`;
 
     let model = stepDef.model || groupProfile.model || groupConfig.model;
-    if (fallbackModel) {
-      model = fallbackModel;
-    } else if (groupConfig.rotation_mode === 'round_robin') {
-      const nextModel = getGroupNextModel(run.cwd || cwd, stepDef.group);
-      if (nextModel) model = nextModel;
-    } else if (groupConfig.fallback_profiles?.length > 0) {
-      // error_fallback: start with the first model
-      model = groupConfig.fallback_profiles[0];
-    }
+    let reasoningEffort = stepDef.reasoningEffort
+      || stepDef.reasoning_effort
+      || groupProfile.profile?.reasoningEffort
+      || groupProfile.profile?.reasoning_effort
+      || groupConfig.reasoningEffort
+      || groupConfig.reasoning_effort;
 
     if (skill) {
       // Skills can be active via prompt injection, as we do for scheduled tasks
@@ -460,6 +466,7 @@ function spawnStep(stepDef, run, runId, bounceReason, fallbackModel) {
     const args = buildCliArgs(provider, prompt, {
       approvalMode: stepDef.approvalMode || 'yolo',
       model,
+      reasoningEffort,
     });
     if (provider === 'gemini' && policy) {
       args.push('--policy', policy);
@@ -642,30 +649,12 @@ function tickPipelines() {
             // Fail fast: kill siblings
             for (const pid of pids) if (isAlive(pid)) killGroup(pid);
 
-            const groupConfig = stepDef.group ? (getGroup(run.cwd || cwd, stepDef.group) || {}) : {};
-            const fallbacks = groupConfig.fallback_profiles || [];
-            const rotationMode = groupConfig.rotation_mode || 'error_fallback';
-            step.fallbackIndex = step.fallbackIndex || 0;
-
-            if (rotationMode === 'error_fallback' && step.fallbackIndex + 1 < fallbacks.length) {
-              step.fallbackIndex++;
-              const nextModel = fallbacks[step.fallbackIndex];
-              console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode}). Fallback: retrying all agents with model ${nextModel}`);
-              
-              step.status = 'running';
-              step.startedAt = new Date().toISOString();
-              step.exitCode = null; // reset
-              const newPids = spawnStep(stepDef, run, runId, null, nextModel);
-              step.pids = newPids;
-              if (newPids.length > 0) step.pid = newPids[0];
-            } else {
-              step.status = 'failed';
-              step.completedAt = new Date().toISOString();
-              console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode})`);
-              if (pipeline.onError === 'stop') {
-                run.status = 'failed';
-                run.completedAt = new Date().toISOString();
-              }
+            step.status = 'failed';
+            step.completedAt = new Date().toISOString();
+            console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode})`);
+            if (pipeline.onError === 'stop') {
+              run.status = 'failed';
+              run.completedAt = new Date().toISOString();
             }
             modified = true;
           } else if (livingPids === 0) {
@@ -689,30 +678,12 @@ function tickPipelines() {
                 console.error(`[pipeline] Step "${stepDef.name}" auto-completed (pid dead, exit: ${step.exitCode})`);
               } else {
                 // Failed
-                const groupConfig = stepDef.group ? (getGroup(run.cwd || cwd, stepDef.group) || {}) : {};
-                const fallbacks = groupConfig.fallback_profiles || [];
-                const rotationMode = groupConfig.rotation_mode || 'error_fallback';
-                step.fallbackIndex = step.fallbackIndex || 0;
-
-                if (rotationMode === 'error_fallback' && step.fallbackIndex + 1 < fallbacks.length) {
-                  step.fallbackIndex++;
-                  const nextModel = fallbacks[step.fallbackIndex];
-                  console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode}). Fallback: retrying with model ${nextModel} (${step.fallbackIndex + 1}/${fallbacks.length})`);
-                  
-                  step.status = 'running';
-                  step.startedAt = new Date().toISOString();
-                  step.exitCode = null; // reset
-                  const pids = spawnStep(stepDef, run, runId, null, nextModel);
-                  step.pids = pids;
-                  if (pids.length > 0) step.pid = pids[0];
-                } else {
-                  step.status = 'failed';
-                  step.completedAt = new Date().toISOString();
-                  console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode})`);
-                  if (pipeline.onError === 'stop') {
-                    run.status = 'failed';
-                    run.completedAt = new Date().toISOString();
-                  }
+                step.status = 'failed';
+                step.completedAt = new Date().toISOString();
+                console.error(`[pipeline] Step "${stepDef.name}" failed (exit: ${step.exitCode})`);
+                if (pipeline.onError === 'stop') {
+                  run.status = 'failed';
+                  run.completedAt = new Date().toISOString();
                 }
               }
               modified = true;

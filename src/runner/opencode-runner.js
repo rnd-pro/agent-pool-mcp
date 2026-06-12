@@ -6,7 +6,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
-import { getGroupNextModel } from '../tools/groups.js';
 import { createProcessWatchdog } from './timeout-manager.js';
 import { createOpenCodeEnv, cleanupTmpConfig } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
@@ -75,55 +74,7 @@ function normalizeEvent(ev) {
 }
 
 export async function runOpencodeStreaming(options) {
-  let attempt = 0;
-  let fallbacks = options.groupConfig?.fallback_profiles || [];
-  let rotationMode = options.groupConfig?.rotation_mode || 'error_fallback';
-  
-  let currentModel = options.model;
-  if (!currentModel) {
-    if (rotationMode === 'round_robin' && options.groupConfig?.name) {
-      currentModel = getGroupNextModel(options.cwd ?? process.cwd(), options.groupConfig.name);
-    } else if (fallbacks.length > 0) {
-      currentModel = fallbacks[0];
-    }
-  }
-
-  while (true) {
-    let runOpts = { ...options, model: currentModel };
-    
-    if (attempt > 0 && options.taskId) {
-      pushTaskEvent(options.taskId, {
-        type: 'message',
-        role: 'system',
-        content: `🔄 [Fallback Triggered] Retrying task with model: ${currentModel} (Attempt ${attempt + 1})`
-      });
-      console.error(`[opencode-runner] Fallback: Retrying with ${currentModel}`);
-    }
-
-    let result = await runOpencodeStreamingInternal(runOpts);
-
-    // Check if it failed
-    let hasError = result.exitCode !== 0 && result.exitCode !== null;
-    let hasStreamError = result.errors && result.errors.length > 0;
-    
-    if (rotationMode === 'error_fallback' && (hasError || hasStreamError)) {
-      // Find index of current model in fallbacks
-      let nextIndex = 0;
-      if (currentModel) {
-        nextIndex = fallbacks.indexOf(currentModel) + 1;
-      }
-      
-      if (nextIndex > 0 && nextIndex < fallbacks.length) {
-        // We have a fallback
-        currentModel = fallbacks[nextIndex];
-        attempt++;
-        continue;
-      }
-    }
-
-    // Return the result (either successful or exhausted fallbacks)
-    return result;
-  }
+  return runOpencodeStreamingInternal(options);
 }
 
 async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessionId, taskId, skill, groupConfig, chat_id }) {

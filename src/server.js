@@ -22,12 +22,12 @@ import { runClaudeStreaming } from './runner/claude-runner.js';
 import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
-import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, listTaskState, cancelTask, finishTask, setNotifyCallback } from './tools/results.js';
+import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, listTaskState, cancelTask, finishTask, setNotifyCallback, pushTaskEvent } from './tools/results.js';
 import { listSkills, getSkillContent, createSkill, deleteSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
 import { addSchedule, listSchedules, removeSchedule, getScheduledResults, getDaemonStatus } from './scheduler/scheduler.js';
 import { createPipeline, listPipelines, runPipeline, getRun, listRuns, cancelRun, signalStepComplete, bounceBack } from './scheduler/pipeline.js';
-import { createGroup, listGroups, getGroup, getGroupNextProfile } from './tools/groups.js';
+import { createGroup, listGroups, getGroup, deleteGroup, getGroupNextProfile } from './tools/groups.js';
 import { sendMessage, getMessages } from './tools/messaging.js';
 import { saveScript, listScripts } from './tools/scripts.js';
 import { getBoardStore } from './tools/board-store.js';
@@ -278,6 +278,138 @@ function guardToolCall(name, args = {}) {
   return null;
 }
 
+function selectStreamingRunner(provider, taskId) {
+  if (provider === 'mock') {
+    return async () => {
+      await new Promise(r => setTimeout(r, 100));
+      process.stderr.write(`__TASK_NOTIFY__${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/task/event',
+        params: { taskId, type: 'event', data: { type: 'message', role: 'assistant', content: 'Integration Test Success' } }
+      })}\n`);
+      return { exitCode: 0, response: 'Mock final response' };
+    };
+  }
+  if (provider === 'opencode') return runOpencodeStreaming;
+  if (provider === 'codex') return runCodexStreaming;
+  if (provider === 'claude') return runClaudeStreaming;
+  return runGeminiStreaming;
+}
+
+function providerRequirementError(provider) {
+  if (isDepthExceeded() && provider === 'gemini') return DEPTH_EXCEEDED_ERROR;
+  if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
+  if (provider === 'opencode' && !checkOpencode()) {
+    return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
+  }
+  if (provider === 'codex' && !checkCodex()) {
+    return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
+  }
+  if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
+  return null;
+}
+
+function errorResponseText(response) {
+  return response?.content?.map((item) => item.text).filter(Boolean).join('\n') || 'Provider is unavailable';
+}
+
+function makeProviderFailureResult(reason) {
+  return {
+    exitCode: -1,
+    response: '',
+    stats: null,
+    toolCalls: [],
+    toolResults: [],
+    errors: [reason],
+    totalEvents: 0,
+    softTimeout: false,
+  };
+}
+
+function isFailedRunResult(result) {
+  if (!result) return true;
+  if (result.softTimeout) return false;
+  if (result.exitCode !== undefined && result.exitCode !== null && result.exitCode !== 0) return true;
+  return Array.isArray(result.errors) && result.errors.length > 0;
+}
+
+function resultFailureReason(result) {
+  let error = Array.isArray(result?.errors) ? result.errors.find(Boolean) : null;
+  if (error) return String(error).split('\n')[0].slice(0, 220);
+  if (result?.exitCode !== undefined && result.exitCode !== null && result.exitCode !== 0) {
+    return `exit code ${result.exitCode}`;
+  }
+  return 'provider attempt failed';
+}
+
+const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const APPROVAL_MODES = new Set(['yolo', 'auto_edit', 'plan']);
+
+function normalizeReasoningEffort(value) {
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized === 'default') return null;
+  return CODEX_REASONING_EFFORTS.has(normalized) ? normalized : null;
+}
+
+function normalizeApprovalMode(value) {
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  return APPROVAL_MODES.has(normalized) ? normalized : null;
+}
+
+function approvalModeFromPolicy(policy) {
+  if (policy === 'read-only') return 'plan';
+  if (policy === 'read-write') return 'auto_edit';
+  if (policy === 'admin') return 'yolo';
+  return null;
+}
+
+function resourceGroupApprovalMode(resourceGroup) {
+  return normalizeApprovalMode(resourceGroup?.approval_mode ?? resourceGroup?.approvalMode)
+    ?? approvalModeFromPolicy(resourceGroup?.policy);
+}
+
+function profileOption(profile, camelName, snakeName) {
+  return profile?.[camelName] ?? profile?.[snakeName] ?? profile?.profile?.[camelName] ?? profile?.profile?.[snakeName] ?? null;
+}
+
+function resolveRunProfile(profile, resourceGroup, agentDef) {
+  let provider = profile?.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
+  let reasoningEffort = provider === 'codex'
+    ? normalizeReasoningEffort(
+      profileOption(profile, 'reasoningEffort', 'reasoning_effort')
+      ?? resourceGroup?.reasoningEffort
+      ?? resourceGroup?.reasoning_effort
+      ?? agentDef?.reasoningEffort
+      ?? agentDef?.reasoning_effort
+    )
+    : null;
+  return {
+    provider,
+    model: profile?.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0] ?? null,
+    reasoningEffort,
+    label: profile?.label || null,
+  };
+}
+
+function buildRuntimeFallbackProfiles(args, resourceGroup, resourceProfile) {
+  let profiles = Array.isArray(resourceGroup?.profiles)
+    ? resourceGroup.profiles.filter(profile => profile && (profile.provider || profile.model))
+    : [];
+  let rotationMode = resourceGroup?.rotation_mode || 'error_fallback';
+  let usesExplicitTarget = Boolean(args.provider || args.model);
+
+  if (!usesExplicitTarget && rotationMode === 'error_fallback' && profiles.length > 1) {
+    return profiles;
+  }
+
+  return [{
+    provider: args.provider || resourceProfile.provider || resourceGroup?.provider || null,
+    model: args.model ?? resourceProfile.model ?? resourceGroup?.model ?? null,
+    reasoningEffort: args.reasoningEffort ?? args.reasoning_effort ?? resourceProfile.profile?.reasoningEffort ?? resourceProfile.profile?.reasoning_effort ?? null,
+    profile: resourceProfile.profile || null,
+  }];
+}
+
 
 const DEPTH_EXCEEDED_ERROR = {
   content: [{
@@ -401,6 +533,7 @@ export function createServer() {
       handleBounceBack,
       handleCreateGroup,
       handleListGroups,
+      handleDeleteGroup,
       handleDelegateToGroup,
       handleSendMessage,
       handleGetMessages,
@@ -538,7 +671,8 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     agentDef = resolveAgent(cwd, args.agent_slug);
     if (agentDef) {
       agentContext = agentDef.prompt;
-      console.error(`[agent-pool] Resolved agent '${args.agent_slug}': ${agentDef.skills.length} skills, policy=${agentDef.policy}`);
+      let groupInfo = agentDef.resourceGroup ? `, group=${agentDef.resourceGroup}` : '';
+      console.error(`[agent-pool] Resolved agent '${args.agent_slug}': ${agentDef.skills.length} skills${groupInfo}`);
     } else {
       console.error(`[agent-pool] Agent '${args.agent_slug}' not found in ${cwd}/.agent-portal/agents/`);
       return {
@@ -550,7 +684,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
 
   // For orchestrator role: inject available agent catalog into context
   if (agentDef?.role === 'orchestrator') {
-    const catalog = buildAgentCatalog(cwd);
+    const catalog = buildAgentCatalog(cwd, { excludeSlug: agentDef.slug });
     if (catalog) {
       agentContext += `\n\n${catalog}`;
     }
@@ -586,11 +720,9 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     }
   }
 
-  // Resolve policy path (built-in templates or absolute path)
-  // Agent policy as default if no explicit policy
+  // Resolve policy path (built-in templates or absolute path).
   let policyPath = args.policy
-    ?? (resourceGroup?.policy || null)
-    ?? (agentDef?.policy && agentDef.policy !== 'read-write' ? agentDef.policy : null);
+    ?? (resourceGroup?.policy || null);
   if (policyPath && !path.isAbsolute(policyPath)) {
     const policiesDir = path.resolve(__dirname, '..', 'policies');
     let builtinPolicy = path.resolve(policiesDir, policyPath);
@@ -611,10 +743,15 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     auto_edit: 'AUTO-EDIT — you can read files and edit code, but shell commands require approval.',
     plan: 'READ-ONLY — you can only read files and analyze code. You CANNOT write files or run destructive commands.',
   };
-  const resolvedMode = args.approval_mode ?? agentDef?.approvalMode ?? approvalMode;
+  const forcedMode = normalizeApprovalMode(approvalMode);
+  const resolvedMode = normalizeApprovalMode(args.approval_mode)
+    ?? (approvalMode === 'plan' ? forcedMode : null)
+    ?? resourceGroupApprovalMode(resourceGroup)
+    ?? forcedMode
+    ?? 'yolo';
   const modeNotice = roleDescriptions[resolvedMode] ?? `Mode: ${resolvedMode}`;
   const minTimeout = resolvedMode === 'plan' ? 300 : 60;
-  const timeout = Math.max(args.timeout ?? config.limits.timeout, minTimeout);
+  const timeout = Math.max(args.timeout ?? resourceGroup?.timeout ?? config.limits.timeout, minTimeout);
 
   // Build workspace scope awareness — tell the agent its sandbox boundaries upfront
   const workspaceDirs = scope.dirs;
@@ -658,6 +795,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     prompt,
     cwd,
     model: args.model ?? resourceProfile.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0],
+    reasoningEffort: normalizeReasoningEffort(args.reasoningEffort ?? args.reasoning_effort ?? resourceProfile.profile?.reasoningEffort ?? resourceProfile.profile?.reasoning_effort),
     approvalMode: resolvedMode,
     timeout,
     sessionId: args.session_id,
@@ -672,22 +810,17 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
 
   // Route to the correct runner based on provider
   const provider = args.provider || resourceProfile.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
-  if (isDepthExceeded() && provider === 'gemini') return DEPTH_EXCEEDED_ERROR;
-  if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
-  if (provider === 'opencode' && !checkOpencode()) {
-    return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
-  }
-  if (provider === 'codex' && !checkCodex()) {
-    return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
-  }
-  if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
+  const runtimeProfiles = buildRuntimeFallbackProfiles(args, resourceGroup, resourceProfile);
+  const hasRuntimeFallback = runtimeProfiles.length > 1;
+  let providerError = providerRequirementError(provider);
+  if (providerError && !hasRuntimeFallback) return providerError;
 
   // ── Model validation ──────────────────────────────────────
   // Catch model typos before spawning a CLI process.
   // Instead of blocking, fall back to default and warn with available models.
   let modelWarning = '';
   const effectiveModel = taskOpts.model;
-  if (effectiveModel && _cachedModels.length > 0) {
+  if (provider === 'opencode' && effectiveModel && _cachedModels.length > 0) {
     const knownIds = _cachedModels.map(m => typeof m === 'string' ? m : m.id);
     const isKnown = knownIds.some(id => id === effectiveModel);
     if (!isKnown) {
@@ -727,6 +860,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     {
       provider,
       model: taskOpts.model ?? null,
+      reasoningEffort: taskOpts.reasoningEffort ?? null,
       runner: args.runner ?? null,
       skill: args.skill ?? null,
       contextMode,
@@ -735,35 +869,56 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     }
   );
 
-  let runFn;
-  if (provider === 'mock') {
-    runFn = async (opts) => {
-      // Simulate a small delay and a streaming event for the integration test
-      await new Promise(r => setTimeout(r, 100));
-      process.stderr.write(`__TASK_NOTIFY__${JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/task/event',
-        params: { taskId, type: 'event', data: { type: 'message', role: 'assistant', content: 'Integration Test Success' } }
-      })}\n`);
-      return { exitCode: 0, response: 'Mock final response' };
-    };
-  } else {
-    if (provider === 'opencode') {
-      runFn = runOpencodeStreaming;
-    } else if (provider === 'codex') {
-      runFn = runCodexStreaming;
-    } else if (provider === 'claude') {
-      runFn = runClaudeStreaming;
-    } else {
-      runFn = runGeminiStreaming;
+  async function runWithProfileFallback() {
+    let lastResult = null;
+    for (let index = 0; index < runtimeProfiles.length; index++) {
+      let profile = resolveRunProfile(runtimeProfiles[index], resourceGroup, agentDef);
+      let requirementError = providerRequirementError(profile.provider);
+      let result;
+
+      if (requirementError) {
+        result = makeProviderFailureResult(errorResponseText(requirementError));
+      } else {
+        let runFn = selectStreamingRunner(profile.provider, taskId);
+        let attemptOpts = {
+          ...taskOpts,
+          model: profile.model,
+          reasoningEffort: profile.reasoningEffort,
+          sessionId: index > 0 && profile.provider !== provider ? undefined : taskOpts.sessionId,
+        };
+        try {
+          result = await runFn(attemptOpts);
+        } catch (err) {
+          if (index >= runtimeProfiles.length - 1) throw err;
+          result = makeProviderFailureResult(err.message || 'provider runner failed');
+        }
+      }
+
+      lastResult = result;
+      if (!isFailedRunResult(result) || index >= runtimeProfiles.length - 1) {
+        return result;
+      }
+
+      let nextProfile = resolveRunProfile(runtimeProfiles[index + 1], resourceGroup, agentDef);
+      pushTaskEvent(taskId, {
+        type: 'provider_fallback',
+        resourceGroup: resourceGroupName,
+        from: profile,
+        to: nextProfile,
+        reason: resultFailureReason(result),
+        attempt: index + 2,
+        total: runtimeProfiles.length,
+      });
+      console.error(`[agent-pool] Provider fallback for task ${taskId}: ${profile.provider}/${profile.model || 'default'} -> ${nextProfile.provider}/${nextProfile.model || 'default'}`);
     }
+    return lastResult;
   }
 
-  runFn(taskOpts)
+  runWithProfileFallback()
     .then((result) => completeTask(taskId, result))
     .catch((err) => failTask(taskId, err.message));
 
-  const mode = args.approval_mode ?? approvalMode;
+  const mode = resolvedMode;
   const runnerInfo = args.runner ? `\n- **Runner**: ${args.runner}` : '';
   const skillInfo = args.skill ? `\n- **Skill**: ${args.skill}` : '';
   const policyInfo = policyPath ? `\n- **Policy**: ${policyPath}` : '';
@@ -1245,9 +1400,10 @@ function handleCreateGroup(args) {
     runner: args.runner,
     skill: args.skill,
     policy: args.policy,
+    approval_mode: args.approval_mode,
     max_agents: args.max_agents,
+    timeout: args.timeout,
     include_dirs: args.include_dirs,
-    fallback_profiles: args.fallback_profiles,
     rotation_mode: args.rotation_mode,
     model_tier: args.model_tier,
   });
@@ -1259,7 +1415,9 @@ function handleCreateGroup(args) {
   if (args.runner) configParts.push(`runner: ${args.runner}`);
   if (args.skill) configParts.push(`skill: ${args.skill}`);
   if (args.policy) configParts.push(`policy: ${args.policy}`);
+  if (args.approval_mode) configParts.push(`approval: ${args.approval_mode}`);
   if (args.max_agents) configParts.push(`max: ${args.max_agents}`);
+  if (args.timeout) configParts.push(`timeout: ${args.timeout}s`);
 
   return {
     content: [{
@@ -1290,12 +1448,38 @@ function handleListGroups(args) {
     if (g.runner) parts.push(`runner: ${g.runner}`);
     if (g.skill) parts.push(`skill: ${g.skill}`);
     if (g.policy) parts.push(`policy: ${g.policy}`);
+    if (g.approval_mode) parts.push(`approval: ${g.approval_mode}`);
     if (g.max_agents) parts.push(`max: ${g.max_agents}`);
+    if (g.timeout) parts.push(`timeout: ${g.timeout}s`);
     return `- **${g.name}** — ${parts.join(', ') || 'no config'}`;
   });
 
   return {
     content: [{ type: 'text', text: `## Agent Groups (${groups.length})\n\n${lines.join('\n')}` }],
+  };
+}
+
+/**
+ * @param {object} args
+ * @returns {object}
+ */
+function handleDeleteGroup(args) {
+  const cwd = args.cwd ?? defaultCwd;
+  if (!args.name) {
+    return {
+      content: [{ type: 'text', text: '❌ Missing required `name` argument for delete_group.' }],
+      isError: true,
+    };
+  }
+  const deleted = deleteGroup(cwd, args.name);
+  if (!deleted) {
+    return {
+      content: [{ type: 'text', text: `❌ Group \`${args.name}\` not found. Use \`list_groups\` to see available groups.` }],
+      isError: true,
+    };
+  }
+  return {
+    content: [{ type: 'text', text: `🗑️ Group deleted: \`${args.name}\`` }],
   };
 }
 
@@ -1336,7 +1520,8 @@ function handleDelegateToGroup(args) {
       cwd,
       provider: args.provider || profile.provider || group.provider || DEFAULT_PROVIDER,
       model: args.model || profile.model || group.model || undefined,
-      approval_mode: args.approval_mode,
+      reasoningEffort: args.reasoningEffort || args.reasoning_effort || profile.profile?.reasoningEffort || profile.profile?.reasoning_effort || undefined,
+      approval_mode: args.approval_mode || group.approval_mode || undefined,
       agent_slug: args.agent_slug,
       system_prompt: args.system_prompt,
       context_mode: args.context_mode,
@@ -1349,7 +1534,7 @@ function handleDelegateToGroup(args) {
       skill: group.skill || undefined,
       policy: group.policy || undefined,
       include_dirs: args.include_dirs || group.include_dirs || undefined,
-      timeout: args.timeout,
+      timeout: args.timeout ?? group.timeout ?? undefined,
       groupConfig: { name: args.group, ...group },
       resource_group: args.group,
     };

@@ -74,7 +74,19 @@ function sandboxMode(approvalMode) {
   return 'danger-full-access';
 }
 
-export function runCodexStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, chat_id }) {
+const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+
+function normalizeReasoningEffort(value) {
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized === 'default') return null;
+  return CODEX_REASONING_EFFORTS.has(normalized) ? normalized : null;
+}
+
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approvalMode, timeout, sessionId, taskId, chat_id }) {
   return new Promise((resolve) => {
     let finalPrompt = prompt;
     try {
@@ -98,6 +110,16 @@ export function runCodexStreaming({ prompt, cwd, model, approvalMode, timeout, s
       args.push('--model', effectiveModel);
     }
 
+    let effectiveReasoningEffort = normalizeReasoningEffort(reasoningEffort);
+    if (effectiveReasoningEffort) {
+      args.push('-c', `model_reasoning_effort=${JSON.stringify(effectiveReasoningEffort)}`);
+    }
+
+    let portalUrl = resolvePortalUrl();
+    if (portalUrl && chat_id) {
+      portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(chat_id);
+      args.push('-c', `mcp_servers.agent-portal={url=${tomlString(portalUrl)}}`);
+    }
     if (sessionId) {
       args.push(sessionId);
     }
@@ -107,11 +129,6 @@ export function runCodexStreaming({ prompt, cwd, model, approvalMode, timeout, s
     let effectiveTimeout = timeout ?? config.limits.timeout;
     let timeoutMs = effectiveTimeout * 1000;
     let effectiveCwd = cwd ?? process.cwd();
-
-    let portalUrl = resolvePortalUrl();
-    if (portalUrl && chat_id) {
-      portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(chat_id);
-    }
 
     let currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
     let child = spawn('codex', args, {

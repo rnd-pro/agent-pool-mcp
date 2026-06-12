@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseFrontmatter as parseSkillFrontmatter } from '../src/tools/markdown-parser.js';
 import { parseFrontmatter as parseWorkflowFrontmatter } from '../src/tools/workflow-index.js';
 import { listSkills } from '../src/tools/skills.js';
-import { resolveAgent, resolveAgentMetadata } from '../src/agents/agent-resolver.js';
+import { buildAgentCatalog, resolveAgent, resolveAgentMetadata } from '../src/agents/agent-resolver.js';
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-frontmatter-${Date.now()}`);
 
@@ -105,7 +105,6 @@ resource_group: deepseek-pro-audit
 models:
   - deepseek/deepseek-v4-pro
 context_tags: [review, gateway]
-approval_mode: plan
 ---
 Agent body`);
 
@@ -116,7 +115,42 @@ Agent body`);
     assert.equal(meta.resourceGroup, 'deepseek-pro-audit');
     assert.deepStrictEqual(meta.models, ['deepseek/deepseek-v4-pro']);
     assert.deepStrictEqual(meta.contextTags, ['review', 'gateway']);
-    assert.equal(meta.approvalMode, 'plan');
+    assert.equal('approvalMode' in meta, false);
+    assert.equal('policy' in meta, false);
+  });
+
+  it('composes agent prompts from frontmatter and inline skills', () => {
+    const agentsDir = path.join(TEST_CWD, '.agent-portal', 'agents');
+    const skillsDir = path.join(TEST_CWD, '.agent-portal', 'skills', 'process');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(path.join(skillsDir, 'qa-skill.md'), `---
+name: qa-skill
+description: QA contract
+---
+Required QA skill content.`);
+    fs.writeFileSync(path.join(skillsDir, 'inline-skill.md'), `---
+name: inline-skill
+description: Inline contract
+---
+Inline guidance content.`);
+    fs.writeFileSync(path.join(agentsDir, 'qa.md'), `---
+name: qa
+skills:
+  - qa-skill
+---
+Agent body
+
+{{skill:inline-skill}}`);
+
+    const agent = resolveAgent(TEST_CWD, 'qa');
+
+    assert.ok(agent);
+    assert.deepStrictEqual(agent.skills, ['qa-skill']);
+    assert.match(agent.prompt, /Required QA skill content/);
+    assert.match(agent.prompt, /Agent body/);
+    assert.match(agent.prompt, /Inline guidance content/);
+    assert.ok(agent.prompt.indexOf('Required QA skill content') < agent.prompt.indexOf('Agent body'));
   });
 
   it('does not resolve agents with missing required skills', () => {
@@ -130,5 +164,28 @@ skills:
 Agent body`);
 
     assert.equal(resolveAgent(TEST_CWD, 'broken'), null);
+  });
+
+  it('can exclude the current orchestrator from the injected agent catalog', () => {
+    const agentsDir = path.join(TEST_CWD, '.agent-portal', 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(path.join(agentsDir, 'orchestrator.md'), `---
+name: orchestrator
+role: orchestrator
+resource_group: reasoning-heavy
+---
+Orchestrator body`);
+    fs.writeFileSync(path.join(agentsDir, 'backend-engineer.md'), `---
+name: backend-engineer
+role: executor
+resource_group: implementation
+description: Implements backend code
+---
+Backend body`);
+
+    const catalog = buildAgentCatalog(TEST_CWD, { excludeSlug: 'orchestrator' });
+
+    assert.doesNotMatch(catalog, /- \*\*orchestrator\*\*/);
+    assert.match(catalog, /backend-engineer/);
   });
 });

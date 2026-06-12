@@ -36,6 +36,7 @@ export function createToolRouter({ handlers, guardToolCall, getActiveTasks }) {
     bounce_back: handlers.handleBounceBack,
     create_group: handlers.handleCreateGroup,
     list_groups: handlers.handleListGroups,
+    delete_group: handlers.handleDeleteGroup,
     delegate_to_group: handlers.handleDelegateToGroup,
     send_message: handlers.handleSendMessage,
     get_messages: handlers.handleGetMessages,

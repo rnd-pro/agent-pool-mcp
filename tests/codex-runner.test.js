@@ -7,6 +7,7 @@ import path from 'node:path';
 let oldPath;
 let oldArgsFile;
 let oldStderr;
+let oldPortalMcpUrl;
 let tmpDir;
 
 describe('codex runner', () => {
@@ -14,6 +15,7 @@ describe('codex runner', () => {
     oldPath = process.env.PATH;
     oldArgsFile = process.env.CODEX_RUNNER_ARGS_FILE;
     oldStderr = process.env.CODEX_RUNNER_STDERR;
+    oldPortalMcpUrl = process.env.PORTAL_MCP_URL;
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-runner-test-'));
 
     let binPath = path.join(tmpDir, 'codex');
@@ -48,6 +50,11 @@ for (const event of events) console.log(JSON.stringify(event));
       delete process.env.CODEX_RUNNER_STDERR;
     } else {
       process.env.CODEX_RUNNER_STDERR = oldStderr;
+    }
+    if (oldPortalMcpUrl === undefined) {
+      delete process.env.PORTAL_MCP_URL;
+    } else {
+      process.env.PORTAL_MCP_URL = oldPortalMcpUrl;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -89,6 +96,46 @@ for (const event of events) console.log(JSON.stringify(event));
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
     assert.equal(args.includes('--model'), false);
     assert.equal(args.includes('default'), false);
+  });
+
+  it('passes Codex model and reasoning effort overrides', async () => {
+    let argsFile = path.join(tmpDir, 'args-reasoning.json');
+    process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
+
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+    await runCodexStreaming({
+      prompt: 'hello',
+      cwd: tmpDir,
+      model: 'gpt-5.5',
+      reasoningEffort: 'xhigh',
+      timeout: 5,
+    });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.equal(args[args.indexOf('--model') + 1], 'gpt-5.5');
+    assert.equal(args[args.indexOf('-c') + 1], 'model_reasoning_effort="xhigh"');
+  });
+
+  it('passes a chat-scoped portal MCP config override to Codex', async () => {
+    let argsFile = path.join(tmpDir, 'args-chat-mcp.json');
+    process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
+    process.env.PORTAL_MCP_URL = 'http://127.0.0.1:52395/mcp?transport=stream';
+
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+    await runCodexStreaming({
+      prompt: 'hello',
+      cwd: tmpDir,
+      chat_id: 'chat 123',
+      timeout: 5,
+    });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    let configIndex = args.indexOf('-c');
+    assert.notEqual(configIndex, -1);
+    assert.equal(
+      args[configIndex + 1],
+      'mcp_servers.agent-portal={url="http://127.0.0.1:52395/mcp?transport=stream&chatId=chat%20123"}',
+    );
   });
 
   it('maps approval modes to Codex sandbox modes', async () => {

@@ -31,6 +31,14 @@ const DELEGATE_CONTEXT_PROPERTIES = {
   },
 };
 
+const CODEX_REASONING_EFFORT_PROPERTY = {
+  reasoningEffort: {
+    type: 'string',
+    enum: ['default', 'low', 'medium', 'high', 'xhigh'],
+    description: 'Codex CLI reasoning effort. Applies only to provider: codex and maps to model_reasoning_effort.',
+  },
+};
+
 const CONTEXT_FILE_HINT_PROPERTY = {
   files: {
     type: 'array',
@@ -88,6 +96,7 @@ export function getToolDefinitions(ctx = {}) {
         provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, gemini = Gemini CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
         cwd: { type: 'string', description: 'Working directory for the agent. Defaults to current working directory.' },
         model: { type: 'string', description: modelDesc },
+        ...CODEX_REASONING_EFFORT_PROPERTY,
         approval_mode: {
           type: 'string',
           enum: ['yolo', 'auto_edit', 'plan'],
@@ -130,6 +139,7 @@ export function getToolDefinitions(ctx = {}) {
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
         provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, gemini = Gemini CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
         model: { type: 'string', description: modelDesc },
+        ...CODEX_REASONING_EFFORT_PROPERTY,
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
         session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Gemini, Codex, OpenCode, and Claude Code where available. Use list_sessions for Gemini sessions.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
@@ -492,7 +502,7 @@ export function getToolDefinitions(ctx = {}) {
   // ─── Group Tools ────────────────────────────────────────
   {
     name: 'create_group',
-    description: 'Create a named agent group with shared config (runner, skill, policy). Groups are reusable presets for fractal orchestration.',
+    description: 'Create a named agent group with shared runtime config. Groups are reusable presets for fractal orchestration.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -506,6 +516,7 @@ export function getToolDefinitions(ctx = {}) {
             properties: {
               provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'] },
               model: { type: 'string' },
+              ...CODEX_REASONING_EFFORT_PROPERTY,
             },
           },
           description: 'Ordered provider/model profiles for this resource group. First profile is used by default; round_robin rotates.',
@@ -513,9 +524,10 @@ export function getToolDefinitions(ctx = {}) {
         runner: { type: 'string', description: 'Default runner for agents in this group.' },
         skill: { type: 'string', description: 'Default skill activated for all agents in this group.' },
         policy: { type: 'string', description: 'Default policy restricting agent permissions.' },
+        approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Default access mode for agents in this group.' },
         max_agents: { type: 'number', description: 'Max concurrent agents allowed in this group.' },
+        timeout: { type: 'number', description: 'Default timeout in seconds for tasks in this group.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories agents in this group can access.' },
-        fallback_profiles: { type: 'array', items: { type: 'string' }, description: 'Legacy model fallback list. Prefer profiles[].' },
         rotation_mode: { type: 'string', enum: ['error_fallback', 'round_robin'], description: 'Profile rotation strategy. Default: error_fallback.' },
         model_tier: { type: 'string', description: 'Logical tier label for UI/docs, e.g. fast, standard, advanced.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
@@ -536,6 +548,18 @@ export function getToolDefinitions(ctx = {}) {
     },
   },
   {
+    name: 'delete_group',
+    description: 'Delete a named agent resource group.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Group name to delete.' },
+        cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
     name: 'delegate_to_group',
     description: [
       'Delegate a task to a named agent group. Spawns agents with the group\'s shared config (runner, skill, policy).',
@@ -550,6 +574,7 @@ export function getToolDefinitions(ctx = {}) {
         prompt: { type: 'string', description: 'Task description for the agents.' },
         provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider override for this group delegation. Default: group provider or codex.' },
         model: { type: 'string', description: 'Model override for this group delegation. Default: group profile/model.' },
+        ...CODEX_REASONING_EFFORT_PROPERTY,
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode override passed to child tasks.' },
         agent_slug: { type: 'string', description: 'Agent role slug passed to child tasks.' },
         chat_id: { type: 'string', description: 'Existing chat ID to bind child tasks to.' },

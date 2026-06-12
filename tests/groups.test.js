@@ -8,7 +8,7 @@ const TEST_CWD = path.join(os.tmpdir(), `agent-pool-groups-test-${Date.now()}`);
 const TEST_HOME = path.join(TEST_CWD, 'portal-home');
 
 describe('groups.js', () => {
-  let createGroup, listGroups, getGroup, deleteGroup, getGroupNextModel, getGroupNextProfile;
+  let createGroup, listGroups, getGroup, deleteGroup, getGroupNextProfile;
 
   before(async () => {
     process.env.AGENT_PORTAL_CONFIG_DIR = TEST_HOME;
@@ -17,7 +17,6 @@ describe('groups.js', () => {
     listGroups = mod.listGroups;
     getGroup = mod.getGroup;
     deleteGroup = mod.deleteGroup;
-    getGroupNextModel = mod.getGroupNextModel;
     getGroupNextProfile = mod.getGroupNextProfile;
 
     if (!fs.existsSync(TEST_CWD)) {
@@ -36,7 +35,13 @@ describe('groups.js', () => {
     const res = createGroup(TEST_CWD, {
       name: 'test-group',
       rotation_mode: 'round_robin',
-      fallback_profiles: ['modelA', 'modelB', 'modelC']
+      profiles: [
+        { provider: 'codex', model: 'modelA' },
+        { provider: 'codex', model: 'modelB' },
+        { provider: 'codex', model: 'modelC' },
+      ],
+      approval_mode: 'auto_edit',
+      timeout: 450,
     });
 
     assert.strictEqual(res.name, 'test-group');
@@ -44,26 +49,43 @@ describe('groups.js', () => {
 
     const group = getGroup(TEST_CWD, 'test-group');
     assert.strictEqual(group.rotation_mode, 'round_robin');
-    assert.deepStrictEqual(group.fallback_profiles, ['modelA', 'modelB', 'modelC']);
+    assert.deepStrictEqual(group.profiles, [
+      { provider: 'codex', model: 'modelA' },
+      { provider: 'codex', model: 'modelB' },
+      { provider: 'codex', model: 'modelC' },
+    ]);
+    assert.equal('fallback_profiles' in group, false);
+    assert.strictEqual(group.approval_mode, 'auto_edit');
+    assert.strictEqual(group.timeout, 450);
   });
 
-  it('getGroupNextModel with error_fallback always returns first model', () => {
+  it('getGroupNextProfile with error_fallback always returns the first ordered profile', () => {
     createGroup(TEST_CWD, {
       name: 'error-group',
       rotation_mode: 'error_fallback',
-      fallback_profiles: ['primary', 'secondary']
+      profiles: [
+        { provider: 'claude', model: 'primary' },
+        { provider: 'claude', model: 'secondary' },
+      ],
     });
 
-    assert.strictEqual(getGroupNextModel(TEST_CWD, 'error-group'), 'primary');
-    assert.strictEqual(getGroupNextModel(TEST_CWD, 'error-group'), 'primary'); // Does not rotate
+    assert.deepStrictEqual(getGroupNextProfile(TEST_CWD, 'error-group'), {
+      provider: 'claude',
+      model: 'primary',
+      profile: { provider: 'claude', model: 'primary' },
+    });
+    assert.deepStrictEqual(getGroupNextProfile(TEST_CWD, 'error-group'), {
+      provider: 'claude',
+      model: 'primary',
+      profile: { provider: 'claude', model: 'primary' },
+    });
   });
 
-  it('getGroupNextModel with round_robin rotates cyclically and persists', () => {
-    // We created test-group with modelA, modelB, modelC
-    assert.strictEqual(getGroupNextModel(TEST_CWD, 'test-group'), 'modelA');
-    assert.strictEqual(getGroupNextModel(TEST_CWD, 'test-group'), 'modelB');
-    assert.strictEqual(getGroupNextModel(TEST_CWD, 'test-group'), 'modelC');
-    assert.strictEqual(getGroupNextModel(TEST_CWD, 'test-group'), 'modelA'); // Wraps around
+  it('getGroupNextProfile with round_robin rotates cyclically and persists', () => {
+    assert.strictEqual(getGroupNextProfile(TEST_CWD, 'test-group').model, 'modelA');
+    assert.strictEqual(getGroupNextProfile(TEST_CWD, 'test-group').model, 'modelB');
+    assert.strictEqual(getGroupNextProfile(TEST_CWD, 'test-group').model, 'modelC');
+    assert.strictEqual(getGroupNextProfile(TEST_CWD, 'test-group').model, 'modelA');
 
     // Check persistence in file
     const stateFile = path.join(TEST_HOME, 'resource-group-states.json');
@@ -77,15 +99,15 @@ describe('groups.js', () => {
       name: 'profile-group',
       rotation_mode: 'round_robin',
       profiles: [
-        { provider: 'codex', model: 'default' },
+        { provider: 'codex', model: 'gpt-5.5', reasoningEffort: 'xhigh' },
         { provider: 'opencode', model: 'openrouter/test-model' },
       ],
     });
 
     assert.deepStrictEqual(getGroupNextProfile(TEST_CWD, 'profile-group'), {
       provider: 'codex',
-      model: 'default',
-      profile: { provider: 'codex', model: 'default' },
+      model: 'gpt-5.5',
+      profile: { provider: 'codex', model: 'gpt-5.5', reasoningEffort: 'xhigh' },
     });
     assert.deepStrictEqual(getGroupNextProfile(TEST_CWD, 'profile-group'), {
       provider: 'opencode',

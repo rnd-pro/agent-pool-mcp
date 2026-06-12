@@ -6,6 +6,7 @@ import path from 'node:path';
 
 let oldPath;
 let oldArgsFile;
+let oldEnvFile;
 let oldStderr;
 let oldPortalConfigDir;
 let tmpDir;
@@ -14,6 +15,7 @@ describe('claude runner', () => {
   beforeEach(() => {
     oldPath = process.env.PATH;
     oldArgsFile = process.env.CLAUDE_RUNNER_ARGS_FILE;
+    oldEnvFile = process.env.CLAUDE_RUNNER_ENV_FILE;
     oldStderr = process.env.CLAUDE_RUNNER_STDERR;
     oldPortalConfigDir = process.env.PORTAL_CONFIG_DIR;
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-runner-test-'));
@@ -24,6 +26,11 @@ describe('claude runner', () => {
 const fs = require('node:fs');
 if (process.env.CLAUDE_RUNNER_ARGS_FILE) {
   fs.writeFileSync(process.env.CLAUDE_RUNNER_ARGS_FILE, JSON.stringify(process.argv.slice(2)));
+}
+if (process.env.CLAUDE_RUNNER_ENV_FILE) {
+  fs.writeFileSync(process.env.CLAUDE_RUNNER_ENV_FILE, JSON.stringify({
+    ANTHROPIC_SMALL_FAST_MODEL: process.env.ANTHROPIC_SMALL_FAST_MODEL || null
+  }));
 }
 if (process.env.CLAUDE_RUNNER_STDERR) {
   process.stderr.write(process.env.CLAUDE_RUNNER_STDERR);
@@ -49,6 +56,11 @@ for (const event of events) console.log(JSON.stringify(event));
       delete process.env.CLAUDE_RUNNER_ARGS_FILE;
     } else {
       process.env.CLAUDE_RUNNER_ARGS_FILE = oldArgsFile;
+    }
+    if (oldEnvFile === undefined) {
+      delete process.env.CLAUDE_RUNNER_ENV_FILE;
+    } else {
+      process.env.CLAUDE_RUNNER_ENV_FILE = oldEnvFile;
     }
     if (oldStderr === undefined) {
       delete process.env.CLAUDE_RUNNER_STDERR;
@@ -103,5 +115,20 @@ for (const event of events) console.log(JSON.stringify(event));
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
     assert.equal(args.includes('--model'), false);
     assert.equal(args.includes('default'), false);
+  });
+
+  it('pins Claude small-fast requests to the explicit provider model', async () => {
+    let argsFile = path.join(tmpDir, 'args-model.json');
+    let envFile = path.join(tmpDir, 'env-model.json');
+    process.env.CLAUDE_RUNNER_ARGS_FILE = argsFile;
+    process.env.CLAUDE_RUNNER_ENV_FILE = envFile;
+
+    let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
+    await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, model: 'deepseek/deepseek-v4-pro', timeout: 5 });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    let env = JSON.parse(fs.readFileSync(envFile, 'utf8'));
+    assert.equal(args[args.indexOf('--model') + 1], 'deepseek/deepseek-v4-pro');
+    assert.equal(env.ANTHROPIC_SMALL_FAST_MODEL, 'deepseek/deepseek-v4-pro');
   });
 });

@@ -1,6 +1,6 @@
 /**
  * Agent Groups — named config presets for fractal orchestration.
- * Groups bundle provider/model profiles, runner, skill, policy, and max_agents
+ * Groups bundle provider/model profiles, approval mode, policy, timeout, and max_agents
  * into a reusable team config.
  *
  * @module agent-pool/tools/groups
@@ -102,15 +102,16 @@ function saveGroups(cwd, groups) {
  * @param {string} config.name - Group name (e.g. "backend-team")
  * @param {string} [config.provider] - Default CLI provider for agents in this group
  * @param {string} [config.model] - Default model for agents in this group
- * @param {Array<{provider?: string, model?: string}>} [config.profiles] - Provider/model profiles
+ * @param {Array<{provider?: string, model?: string, reasoningEffort?: string}>} [config.profiles] - Provider/model profiles
  * @param {string} [config.runner] - Default runner for agents in this group
  * @param {string} [config.skill] - Default skill for agents in this group
  * @param {string} [config.policy] - Default policy for agents in this group
+ * @param {string} [config.approval_mode] - Default approval mode for agents in this group
  * @param {number} [config.max_agents] - Max concurrent agents in this group
+ * @param {number} [config.timeout] - Default timeout in seconds for agents in this group
  * @param {string[]} [config.include_dirs] - Additional directories agents can access
  * @param {string} [config.model_tier] - Logical model tier ('basic', 'advanced')
  * @param {string} [config.rotation_mode] - Rotation strategy ('error_fallback' or 'round_robin')
- * @param {string[]} [config.fallback_profiles] - Array of model/runner profiles to rotate through
  * @returns {{ name: string, created: boolean }}
  */
 export function createGroup(cwd, config) {
@@ -124,11 +125,12 @@ export function createGroup(cwd, config) {
     runner: config.runner || null,
     skill: config.skill || null,
     policy: config.policy || null,
-    max_agents: config.max_agents || null,
+    approval_mode: config.approval_mode || config.approvalMode || null,
+    max_agents: config.max_agents ?? null,
+    timeout: config.timeout ?? null,
     include_dirs: config.include_dirs || null,
     model_tier: config.model_tier || null,
     rotation_mode: config.rotation_mode || 'error_fallback',
-    fallback_profiles: config.fallback_profiles || [],
     created_at: existed ? groups[config.name].created_at : new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -141,7 +143,7 @@ export function createGroup(cwd, config) {
  * List all groups.
  *
  * @param {string} cwd - Project directory
- * @returns {Array<{ name: string, provider: string|null, model: string|null, profiles: Array<object>, runner: string|null, skill: string|null, policy: string|null, max_agents: number|null }>}
+ * @returns {Array<{ name: string, provider: string|null, model: string|null, profiles: Array<object>, runner: string|null, skill: string|null, policy: string|null, approval_mode: string|null, max_agents: number|null, timeout: number|null }>}
  */
 export function listGroups(cwd) {
   const groups = loadGroups(cwd);
@@ -179,44 +181,8 @@ export function deleteGroup(cwd, name) {
 }
 
 /**
- * Get the next model for a group based on its rotation_mode and fallback_profiles.
- * Maintains state across calls if rotation_mode is 'round_robin'.
- *
- * @param {string} cwd - Project directory
- * @param {string} name - Group name
- * @returns {string|null} - Model profile name, or null if empty
- */
-export function getGroupNextModel(cwd, name) {
-  const group = getGroup(cwd, name);
-  if (!group || !group.fallback_profiles || group.fallback_profiles.length === 0) {
-    return null;
-  }
-
-  const profiles = group.fallback_profiles;
-
-  if (group.rotation_mode === 'round_robin') {
-    const states = loadGroupStates(cwd);
-    if (!states[name]) {
-      states[name] = { currentIndex: 0 };
-    }
-
-    const index = states[name].currentIndex % profiles.length;
-    const model = profiles[index];
-
-    states[name].currentIndex = (index + 1) % profiles.length;
-    saveGroupStates(cwd, states);
-
-    return model;
-  }
-
-  // error_fallback or default: always return the first model initially
-  return profiles[0];
-}
-
-/**
  * Resolve the active provider/model profile for a group.
- * Supports the new `profiles[]` shape and the legacy `fallback_profiles[]`
- * model list used by OpenCode/Gemini flows.
+ * Maintains state across calls if rotation_mode is 'round_robin'.
  *
  * @param {string} cwd - Project directory
  * @param {string} name - Group name
@@ -227,9 +193,7 @@ export function getGroupNextProfile(cwd, name, groupOverride = null) {
   const group = groupOverride || getGroup(cwd, name);
   if (!group) return { provider: null, model: null, profile: null };
 
-  const profiles = Array.isArray(group.profiles) && group.profiles.length > 0
-    ? group.profiles
-    : [];
+  const profiles = Array.isArray(group.profiles) ? group.profiles : [];
 
   if (profiles.length > 0) {
     let profile;
@@ -253,10 +217,9 @@ export function getGroupNextProfile(cwd, name, groupOverride = null) {
     };
   }
 
-  const legacyModel = getGroupNextModel(cwd, name);
   return {
     provider: group.provider || 'codex',
-    model: legacyModel || group.model || null,
-    profile: legacyModel ? { provider: group.provider || 'codex', model: legacyModel } : null,
+    model: group.model || null,
+    profile: null,
   };
 }
