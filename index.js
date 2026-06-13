@@ -3,7 +3,7 @@
 /**
  * Agent Pool MCP Server — Entry Point
  *
- * Multi-agent task delegation and orchestration via Gemini CLI.
+ * Multi-agent task delegation and orchestration via Antigravity CLI.
  * Supports CLI modes: --check, --init, --version, --help.
  *
  * @module agent-pool

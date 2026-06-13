@@ -14,22 +14,13 @@ describe('Provider Config Injector', () => {
     tmpDirsToCleanup = [];
   });
 
-  it('createGeminiEnv creates isolated config and returns env overrides', async () => {
-    let { createGeminiEnv } = await import('../src/runner/provider-config.js');
+  it('createAntigravityEnv returns portal URL env overrides without writing project config', async () => {
+    let { createAntigravityEnv } = await import('../src/runner/provider-config.js');
     
-    let { tmpDir, envOverrides } = createGeminiEnv('http://portal.local/mcp');
-    tmpDirsToCleanup.push(tmpDir);
+    let { tmpDir, envOverrides } = createAntigravityEnv('http://portal.local/mcp');
 
-    assert.ok(tmpDir.includes('gemini-hub-'), 'Should be a gemini-hub temp dir');
-    assert.deepEqual(envOverrides, { GEMINI_CLI_HOME: tmpDir }, 'Should return GEMINI_CLI_HOME env var');
-    
-    let configPath = path.join(tmpDir, '.gemini', 'settings.json');
-    assert.ok(fs.existsSync(configPath), 'Should create settings.json');
-    
-    let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    assert.ok(config.mcpServers, 'Should have mcpServers');
-    assert.ok(config.mcpServers['agent-portal'], 'Should have agent-portal entry');
-    assert.equal(config.mcpServers['agent-portal'].url, 'http://portal.local/mcp');
+    assert.equal(tmpDir, null);
+    assert.deepEqual(envOverrides, { PORTAL_MCP_URL: 'http://portal.local/mcp' });
   });
 
   it('createOpenCodeEnv creates isolated config and returns env overrides', async () => {
@@ -53,9 +44,9 @@ describe('Provider Config Injector', () => {
   });
 
   it('cleanupTmpConfig removes the temporary directory', async () => {
-    let { createGeminiEnv, cleanupTmpConfig } = await import('../src/runner/provider-config.js');
+    let { createOpenCodeEnv, cleanupTmpConfig } = await import('../src/runner/provider-config.js');
     
-    let { tmpDir } = createGeminiEnv('http://portal.local/mcp');
+    let { tmpDir } = createOpenCodeEnv('http://portal.local/mcp');
     assert.ok(fs.existsSync(tmpDir), 'Temp dir should exist initially');
 
     cleanupTmpConfig(tmpDir);

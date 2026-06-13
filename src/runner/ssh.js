@@ -29,7 +29,7 @@ export function escapeShellArg(arg) {
  * @param {string} [provider] - CLI provider binary
  * @returns {{command: string, args: string[]}}
  */
-export function buildSshSpawn(runner, cliArgs, localCwd, provider = 'gemini') {
+export function buildSshSpawn(runner, cliArgs, localCwd, provider = 'agy') {
   const remoteCwd = runner.cwd ?? localCwd;
 
   // Build safe remote command with PID echo

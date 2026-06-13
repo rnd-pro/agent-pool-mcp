@@ -15,7 +15,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 
-import { runGeminiStreaming, listGeminiSessions } from './runner/gemini-runner.js';
+import { runAntigravityStreaming, listAntigravitySessions } from './runner/antigravity-runner.js';
 import { runOpencodeStreaming } from './runner/opencode-runner.js';
 import { runCodexStreaming } from './runner/codex-runner.js';
 import { runClaudeStreaming } from './runner/claude-runner.js';
@@ -95,20 +95,20 @@ function resolveWorkspaceDirs(config, cwd, includeDirs = []) {
 
 // ─── Prerequisite check (cached at startup) ──────────────────
 
-let geminiAvailable = null;
+let antigravityAvailable = null;
 let opencodeAvailable = null;
 let codexAvailable = null;
 let claudeAvailable = null;
 
-function checkGemini() {
-  if (geminiAvailable !== null) return geminiAvailable;
+function checkAntigravity() {
+  if (antigravityAvailable !== null) return antigravityAvailable;
   try {
-    execFileSync('which', ['gemini'], { encoding: 'utf-8', timeout: 2000 });
-    geminiAvailable = true;
+    execFileSync('which', ['agy'], { encoding: 'utf-8', timeout: 2000 });
+    antigravityAvailable = true;
   } catch (e) {
-    geminiAvailable = false;
+    antigravityAvailable = false;
   }
-  return geminiAvailable;
+  return antigravityAvailable;
 }
 
 function checkOpencode() {
@@ -188,18 +188,18 @@ function discoverModels() {
   });
 }
 
-const GEMINI_REQUIRED_ERROR = {
+const ANTIGRAVITY_REQUIRED_ERROR = {
   content: [{
     type: 'text',
-    text: `❌ Gemini CLI is not installed or not in PATH.
+    text: `❌ Antigravity CLI is not installed or not in PATH.
 
 **To fix:**
-1. Install: \`npm install -g @google/gemini-cli\`
-2. Authenticate: run \`gemini\` (opens browser for OAuth)
-3. Verify: \`gemini --version\`
+1. Install: \`curl -fsSL https://antigravity.google/cli/install.sh | bash\`
+2. Authenticate: run \`agy\` (opens browser for OAuth)
+3. Verify: \`agy --version\`
 4. Restart your IDE to reload the MCP server.
 
-Docs: https://github.com/google-gemini/gemini-cli`
+Docs: https://antigravity.google/docs/cli`
   }],
   isError: true,
 };
@@ -220,8 +220,8 @@ Docs: https://code.claude.com/docs/en/cli-reference`
   isError: true,
 };
 
-/** Tools that require Gemini CLI to be installed */
-const GEMINI_TOOLS = new Set([
+/** Tools that can require a local CLI provider to be installed */
+const PROVIDER_TOOLS = new Set([
   'delegate_task', 'delegate_task_readonly', 'consult_peer', 'list_sessions',
   'delegate_to_group',
 ]);
@@ -254,20 +254,20 @@ function requiresDepthBlock(toolName, args = {}) {
   if (!isDepthExceeded()) return false;
   let isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(toolName);
   if (!isDelegateTool) return true;
-  return resolveDelegateProviderForGuard(toolName, args) === 'gemini';
+  return resolveDelegateProviderForGuard(toolName, args) === 'antigravity';
 }
 
 function guardToolCall(name, args = {}) {
-  if (!GEMINI_TOOLS.has(name)) return null;
+  if (!PROVIDER_TOOLS.has(name)) return null;
   if (requiresDepthBlock(name, args)) return DEPTH_EXCEEDED_ERROR;
 
   const isDelegateTool = ['delegate_task', 'delegate_task_readonly', 'delegate_to_group'].includes(name);
   if (!isDelegateTool) {
-    return checkGemini() ? null : GEMINI_REQUIRED_ERROR;
+    return checkAntigravity() ? null : ANTIGRAVITY_REQUIRED_ERROR;
   }
 
   const provider = args.provider || null;
-  if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
+  if (provider === 'antigravity' && !checkAntigravity()) return ANTIGRAVITY_REQUIRED_ERROR;
   if (provider === 'opencode' && !checkOpencode()) {
     return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
   }
@@ -293,12 +293,13 @@ function selectStreamingRunner(provider, taskId) {
   if (provider === 'opencode') return runOpencodeStreaming;
   if (provider === 'codex') return runCodexStreaming;
   if (provider === 'claude') return runClaudeStreaming;
-  return runGeminiStreaming;
+  if (provider === 'antigravity') return runAntigravityStreaming;
+  return runCodexStreaming;
 }
 
 function providerRequirementError(provider) {
-  if (isDepthExceeded() && provider === 'gemini') return DEPTH_EXCEEDED_ERROR;
-  if (provider === 'gemini' && !checkGemini()) return GEMINI_REQUIRED_ERROR;
+  if (isDepthExceeded() && provider === 'antigravity') return DEPTH_EXCEEDED_ERROR;
+  if (provider === 'antigravity' && !checkAntigravity()) return ANTIGRAVITY_REQUIRED_ERROR;
   if (provider === 'opencode' && !checkOpencode()) {
     return { content: [{ type: 'text', text: '❌ OpenCode CLI is not installed or not in PATH.' }], isError: true };
   }
@@ -416,7 +417,7 @@ const DEPTH_EXCEEDED_ERROR = {
     type: 'text',
     text: `⚠️ Orchestration depth limit reached (depth=${CURRENT_DEPTH}, max=${getMaxDepth()}).
 
-This agent-pool instance is running inside a nested Gemini CLI worker.
+This agent-pool instance is running inside a nested Antigravity CLI worker.
 Delegation is disabled at this depth to prevent runaway process spawning.
 
 Execute the task directly instead of delegating it.
@@ -432,8 +433,8 @@ To increase the limit, set AGENT_POOL_MAX_DEPTH to a higher value.`
  * @returns {Server}
  */
 export function createServer() {
-  // Check gemini once at server creation
-  checkGemini();
+  // Check Antigravity once at server creation.
+  checkAntigravity();
   checkCodex();
   checkClaude();
 
@@ -957,9 +958,9 @@ function handleDelegateReadonly(args) {
  * @returns {Promise<object>}
  */
 async function handleListSessions(args) {
-  const sessions = await listGeminiSessions(args.cwd ?? defaultCwd);
+  const sessions = await listAntigravitySessions(args.cwd ?? defaultCwd);
   if (sessions.length === 0) {
-    return { content: [{ type: 'text', text: 'No sessions found for this project.' }] };
+    return { content: [{ type: 'text', text: 'No Antigravity conversations found, or this CLI version does not expose conversation enumeration.' }] };
   }
   const lines = sessions.map(
     (s) => `- **${s.index}**. ${s.preview} (${s.timeAgo}) \`${s.sessionId}\``,

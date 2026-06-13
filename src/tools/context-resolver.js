@@ -32,7 +32,7 @@ const ZONES = {
   runner: {
     tags: ['runner', 'cli', 'agent-runtime'],
     paths: [/runner\//, /scheduler\//, /daemon\.js$/],
-    keywords: ['runner', 'claude code', 'codex', 'gemini', 'opencode', 'cli', 'spawn', 'scheduler'],
+    keywords: ['runner', 'claude code', 'codex', 'antigravity', 'opencode', 'cli', 'spawn', 'scheduler'],
     toolProfile: 'implementation',
   },
   gateway: {

@@ -97,7 +97,7 @@ export function getToolDefinitions(ctx = {}) {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'The task description for the CLI agent. Be specific and detailed.' },
-        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, gemini = Gemini CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
+        provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, antigravity = Antigravity CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
         cwd: { type: 'string', description: 'Working directory for the agent. Defaults to current working directory.' },
         model: { type: 'string', description: modelDesc },
         ...CODEX_REASONING_EFFORT_PROPERTY,
@@ -107,7 +107,7 @@ export function getToolDefinitions(ctx = {}) {
           description: 'Approval mode: yolo (auto-approve all), auto_edit (auto-approve edits only), plan (read-only). Default: yolo.',
         },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
-        session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Gemini, Codex, OpenCode, and Claude Code where available. Use list_sessions for Gemini sessions.' },
+        session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Antigravity, Codex, OpenCode, and Claude Code where available. Use list_sessions for Antigravity sessions.' },
         skill: { type: 'string', description: 'Activate a global or active workspace skill by name before executing the task. Use list_skills to see available skills.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         policy: { type: 'string', description: 'Policy file for tool restrictions. Use built-in template name (e.g. "read-only", "safe-edit") or absolute path to .yaml policy file.' },
@@ -141,11 +141,11 @@ export function getToolDefinitions(ctx = {}) {
       properties: {
         prompt: { type: 'string', description: 'The analysis task for the CLI agent.' },
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
-        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, gemini = Gemini CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
+        provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, antigravity = Antigravity CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
         model: { type: 'string', description: modelDesc },
         ...CODEX_REASONING_EFFORT_PROPERTY,
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
-        session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Gemini, Codex, OpenCode, and Claude Code where available. Use list_sessions for Gemini sessions.' },
+        session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Antigravity, Codex, OpenCode, and Claude Code where available. Use list_sessions for Antigravity sessions.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd.' },
@@ -162,7 +162,7 @@ export function getToolDefinitions(ctx = {}) {
   {
     name: 'consult_peer',
     description: [
-      'Legacy Gemini-only peer consultation for architectural/technical consensus.',
+      'Antigravity-backed peer consultation for architectural/technical consensus.',
       'For Codex orchestration, prefer delegate_task_readonly with resource_group: "review".',
       'Use during PLANNING phase to validate proposals before implementation.',
       'Supports iterative rounds: send proposal, get feedback, revise, resend until AGREE.',
@@ -221,7 +221,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'list_sessions',
-    description: 'List available Gemini CLI sessions for a project directory. Returns session IDs, previews, and age. Use session_id with delegate_task to resume.',
+    description: 'List available Antigravity CLI conversations for a project directory when the CLI exposes them. Use session_id with delegate_task to resume.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -338,7 +338,7 @@ export function getToolDefinitions(ctx = {}) {
       properties: {
         prompt: { type: 'string', description: 'Task prompt for the CLI agent.' },
         cron: { type: 'string', description: 'Cron expression (5-field). E.g. "0 9 * * *" for daily at 9am.' },
-        provider: { type: 'string', enum: ['codex', 'gemini', 'claude'], description: 'CLI provider for scheduled runs. Default: codex.' },
+        provider: { type: 'string', enum: ['codex', 'antigravity', 'claude'], description: 'CLI provider for scheduled runs. Default: codex.' },
         model: { type: 'string', description: 'Model to use. Leave empty for provider default.' },
         cwd: { type: 'string', description: 'Working directory for the scheduled task. Defaults to current directory.' },
         skill: { type: 'string', description: 'Skill to activate for each run.' },
@@ -403,7 +403,7 @@ export function getToolDefinitions(ctx = {}) {
             properties: {
               name: { type: 'string', description: 'Step name.' },
               prompt: { type: 'string', description: 'Step prompt.' },
-              provider: { type: 'string', enum: ['codex', 'gemini', 'claude'], description: 'CLI provider for this step. Default: codex.' },
+              provider: { type: 'string', enum: ['codex', 'antigravity', 'claude'], description: 'CLI provider for this step. Default: codex.' },
               model: { type: 'string', description: 'Model to use. Leave empty for provider default.' },
               trigger: { type: 'string', description: 'Trigger condition.' },
               skill: { type: 'string', description: 'Skill to use.' },
@@ -511,14 +511,14 @@ export function getToolDefinitions(ctx = {}) {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Group name (e.g. "backend-team", "qa-group").' },
-        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'Default CLI provider for agents in this group. Default: codex.' },
+        provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'], description: 'Default CLI provider for agents in this group. Default: codex.' },
         model: { type: 'string', description: 'Default model for agents in this group. Use "default" for provider default.' },
         profiles: {
           type: 'array',
           items: {
             type: 'object',
             properties: {
-              provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'] },
+              provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'] },
               model: { type: 'string' },
               ...CODEX_REASONING_EFFORT_PROPERTY,
             },
@@ -576,7 +576,7 @@ export function getToolDefinitions(ctx = {}) {
       properties: {
         group: { type: 'string', description: 'Group name to delegate to.' },
         prompt: { type: 'string', description: 'Task description for the agents.' },
-        provider: { type: 'string', enum: ['codex', 'gemini', 'opencode', 'claude'], description: 'CLI provider override for this group delegation. Default: group provider or codex.' },
+        provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'], description: 'CLI provider override for this group delegation. Default: group provider or codex.' },
         model: { type: 'string', description: 'Model override for this group delegation. Default: group profile/model.' },
         ...CODEX_REASONING_EFFORT_PROPERTY,
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode override passed to child tasks.' },

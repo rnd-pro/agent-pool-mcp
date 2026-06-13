@@ -1,5 +1,5 @@
 /**
- * Process Manager — tracks spawned Gemini CLI processes and ensures cleanup.
+ * Process Manager — tracks spawned Antigravity CLI processes and ensures cleanup.
  *
  * Fixes zombie process bug: spawns with detached=true, kills with
  * process.kill(-pid) to terminate the entire process group.
@@ -134,19 +134,17 @@ export function listChildren() {
 }
 
 /**
- * Get system-wide Gemini process load.
- * Counts all `gemini` processes on the system, separating ours from external.
+ * Get system-wide Antigravity process load.
+ * Counts all `agy` processes on the system, separating ours from external.
  *
  * @returns {{total: number, ours: number, external: number, warning: string|null}}
  */
 export function getSystemLoad() {
   let total = 0;
   try {
-    // Use the exact gemini binary path to avoid false positives
-    // (e.g. Chrome processes using .gemini/ profile directory)
-    const geminiPath = execSync('which gemini 2>/dev/null || true', { encoding: 'utf-8' }).trim();
-    if (geminiPath) {
-      const out = execSync(`pgrep -f "${geminiPath}" 2>/dev/null || true`, { encoding: 'utf-8' }).trim();
+    const antigravityPath = execSync('which agy 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    if (antigravityPath) {
+      const out = execSync(`pgrep -f "${antigravityPath}" 2>/dev/null || true`, { encoding: 'utf-8' }).trim();
       if (out) {
         total = out.split('\n').filter(Boolean).length;
       }
@@ -160,7 +158,7 @@ export function getSystemLoad() {
 
   let warning = null;
   if (external > 0) {
-    warning = `⚠️ System load: ${external} other Gemini process${external > 1 ? 'es' : ''} running — responses may be slower.`;
+    warning = `⚠️ System load: ${external} other Antigravity process${external > 1 ? 'es' : ''} running — responses may be slower.`;
   }
 
   return { total, ours, external, warning };

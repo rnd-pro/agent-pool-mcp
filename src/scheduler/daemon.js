@@ -76,13 +76,10 @@ function normalizeCodexReasoningEffort(value) {
 
 function buildCliArgs(provider, prompt, opts = {}) {
   const model = opts.model && opts.model !== 'default' ? opts.model : null;
-  if (provider === 'gemini') {
-    const args = [
-      '-p', prompt,
-      '--output-format', 'stream-json',
-      '--approval-mode', opts.approvalMode || 'yolo',
-    ];
-    if (model) args.push('-m', model);
+  if (provider === 'antigravity') {
+    const args = ['-p', prompt];
+    if (model) args.push('--model', model);
+    if ((opts.approvalMode || 'yolo') === 'yolo') args.push('--dangerously-skip-permissions');
     return args;
   }
   if (provider === 'claude') {
@@ -112,6 +109,10 @@ function extractResponse(provider, stdout) {
   const events = stdout.split('\n').filter(Boolean).map((line) => {
     try { return JSON.parse(line); } catch { return null; }
   }).filter(Boolean);
+
+  if (provider === 'antigravity' && events.length === 0) {
+    return { events, response: stdout.trim() };
+  }
 
   if (provider === 'codex') {
     const messages = events
@@ -468,13 +469,11 @@ function spawnStep(stepDef, run, runId, bounceReason) {
       model,
       reasoningEffort,
     });
-    if (provider === 'gemini' && policy) {
-      args.push('--policy', policy);
-    }
-    if (provider === 'gemini' && groupConfig.include_dirs?.length > 0) {
-      for (const dir of groupConfig.include_dirs) {
-        args.push('--include-directories', dir);
-      }
+    if (provider === 'antigravity' && (policy || groupConfig.include_dirs?.length > 0)) {
+      const notes = [];
+      if (policy) notes.push(`Policy file requested by scheduler: ${policy}`);
+      if (groupConfig.include_dirs?.length > 0) notes.push(`Additional directories: ${groupConfig.include_dirs.join(', ')}`);
+      args[1] = `[AGENT POOL EXECUTION NOTES]\n${notes.join('\n')}\n[/AGENT POOL EXECUTION NOTES]\n\n${args[1]}`;
     }
 
     let spawnCmd, spawnArgs, spawnOpts;
@@ -493,12 +492,12 @@ function spawnStep(stepDef, run, runId, bounceReason) {
       };
       if (count > 1) spawnOpts.env.AGENT_INDEX = String(i);
     } else if (isRemote) {
-      const ssh = buildSshSpawn(runner, args, run.cwd || cwd, provider);
+      const ssh = buildSshSpawn(runner, args, run.cwd || cwd, provider === 'antigravity' ? 'agy' : provider);
       spawnCmd = ssh.command;
       spawnArgs = ssh.args;
       spawnOpts = { stdio: ['pipe', 'pipe', 'pipe'], detached: true };
     } else {
-      spawnCmd = provider;
+      spawnCmd = provider === 'antigravity' ? 'agy' : provider;
       spawnArgs = args;
       const currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
       spawnOpts = {

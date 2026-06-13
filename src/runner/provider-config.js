@@ -1,11 +1,9 @@
 // @ctx provider-config.ctx
 //
-// Provider Config Manager — inject portal URL via isolated config directories
+// Provider Config Manager — pass portal URL without project file pollution.
 //
-// Instead of polluting project dirs with .gemini/settings.json, we create
-// temp config directories and point providers to them via env vars:
-//   - Gemini CLI: GEMINI_CLI_HOME → temp dir with settings.json
-//   - OpenCode: OPENCODE_HOME → temp dir with config
+// Some providers support isolated config directories or explicit config files:
+//   - OpenCode: OPENCODE_HOME -> temp dir with config
 //   - Claude Code: --mcp-config → temp JSON file with config
 //
 // Pattern: create temp → set env → cleanup temp on exit
@@ -16,46 +14,19 @@ import os from 'node:os';
 import { resolvePortalUrl } from './url-resolver.js';
 
 /**
- * Create an isolated Gemini CLI config with portal URL.
- * Returns env vars to set on the spawn — NO project file pollution.
+ * Build Antigravity CLI env overrides.
+ * Antigravity's documented MCP config locations are global/workspace files, not
+ * an isolated env-var home, so the runner passes the resolved portal URL without
+ * writing workspace files.
  *
  * @param {string} portalUrl - Portal MCP URL (e.g. "http://portal.local/mcp")
- * @returns {{ envOverrides: object, tmpDir: string }}
+ * @returns {{ envOverrides: object, tmpDir: null }}
  */
-export function createGeminiEnv(portalUrl) {
-  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-hub-'));
-  let geminiDir = path.join(tmpDir, '.gemini');
-  fs.mkdirSync(geminiDir, { recursive: true });
-
-  let defaultHome = process.env.GEMINI_CLI_HOME ? path.join(process.env.GEMINI_CLI_HOME, '.gemini') : path.join(os.homedir(), '.gemini');
-  let existingConfig = {};
-
-  if (fs.existsSync(defaultHome)) {
-    let items = fs.readdirSync(defaultHome);
-    for (let item of items) {
-      if (item === 'settings.json') continue;
-      if (item === 'tmp') continue; // Avoid recursive tmp links if any
-      let src = path.join(defaultHome, item);
-      let dest = path.join(geminiDir, item);
-      try { fs.symlinkSync(src, dest); } catch (e) { /* ignore */ }
-    }
-    
-    let defaultSettings = path.join(defaultHome, 'settings.json');
-    if (fs.existsSync(defaultSettings)) {
-      try { existingConfig = JSON.parse(fs.readFileSync(defaultSettings, 'utf8')); } catch (e) {}
-    }
-  }
-
-  let config = { ...existingConfig };
-  config.mcpServers = config.mcpServers || {};
-  config.mcpServers['agent-portal'] = { url: portalUrl };
-
-  fs.writeFileSync(path.join(geminiDir, 'settings.json'), JSON.stringify(config, null, 2));
-
+export function createAntigravityEnv(portalUrl) {
   return {
-    tmpDir,
+    tmpDir: null,
     envOverrides: {
-      GEMINI_CLI_HOME: tmpDir,
+      PORTAL_MCP_URL: portalUrl,
     },
   };
 }
@@ -163,45 +134,6 @@ export function cleanupTmpConfig(tmpDir) {
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch { /* non-critical */ }
-}
-
-// ── Legacy API (kept for backward compat with tests) ─────
-
-/** @deprecated Use createGeminiEnv instead */
-export function injectGeminiConfig(cwd, portalUrl) {
-  let gemDir = path.join(cwd, '.gemini');
-  let configPath = path.join(gemDir, 'settings.json');
-  let backupPath = configPath + '.bak';
-
-  let existing = {};
-  if (fs.existsSync(configPath)) {
-    try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
-    if (!existing.__portal_injected__ && !fs.existsSync(backupPath)) {
-      fs.copyFileSync(configPath, backupPath);
-    }
-  }
-
-  let injected = { ...existing };
-  injected.mcpServers = { 'agent-portal': { url: portalUrl } };
-  injected.__portal_injected__ = true;
-
-  fs.mkdirSync(gemDir, { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(injected, null, 2));
-}
-
-/** @deprecated Use cleanupTmpConfig instead */
-export function cleanupGeminiConfig(cwd) {
-  let configPath = path.join(cwd, '.gemini', 'settings.json');
-  let backupPath = configPath + '.bak';
-  if (fs.existsSync(backupPath)) {
-    fs.copyFileSync(backupPath, configPath);
-    fs.unlinkSync(backupPath);
-  } else if (fs.existsSync(configPath)) {
-    try {
-      let data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      if (data.__portal_injected__) fs.unlinkSync(configPath);
-    } catch {}
-  }
 }
 
 /** @deprecated Use createOpenCodeEnv instead */

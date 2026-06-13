@@ -16,7 +16,7 @@ export const PACKAGE_JSON = JSON.parse(
   fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
 );
 
-const GEMINI_NPM_PACKAGE = '@google/gemini-cli';
+const ANTIGRAVITY_INSTALL_COMMAND = 'curl -fsSL https://antigravity.google/cli/install.sh | bash';
 const MIN_NODE_VERSION = 20;
 
 // ─── Colors (ANSI) ──────────────────────────────────────────
@@ -59,29 +59,29 @@ export function runCheck() {
     issues++;
   }
 
-  // — Gemini CLI binary
-  let geminiPath = null;
+  // — Antigravity CLI binary
+  let agyPath = null;
   try {
-    geminiPath = execFileSync('which', ['gemini'], { encoding: 'utf-8' }).trim();
+    agyPath = execFileSync('which', ['agy'], { encoding: 'utf-8' }).trim();
   } catch {
     // not found
   }
 
-  if (geminiPath) {
-    let geminiVersion = 'unknown';
+  if (agyPath) {
+    let antigravityVersion = 'unknown';
     try {
-      geminiVersion = execFileSync('gemini', ['--version'], {
+      antigravityVersion = execFileSync('agy', ['--version'], {
         encoding: 'utf-8',
         timeout: 5000,
       }).trim();
     } catch {
       // version check failed
     }
-    ok(`Gemini CLI v${geminiVersion} ${color.dim(geminiPath)}`);
+    ok(`Antigravity CLI v${antigravityVersion} ${color.dim(agyPath)}`);
   } else {
-    fail(`Gemini CLI — not found in PATH`);
-    console.log(color.dim(`     Install: npm install -g ${GEMINI_NPM_PACKAGE}`));
-    console.log(color.dim(`     Then run: gemini (to authenticate)`));
+    fail(`Antigravity CLI — not found in PATH`);
+    console.log(color.dim(`     Install: ${ANTIGRAVITY_INSTALL_COMMAND}`));
+    console.log(color.dim(`     Then run: agy (to authenticate)`));
     issues++;
   }
 
@@ -93,16 +93,16 @@ export function runCheck() {
 
   for (const runner of config.runners) {
     if (runner.type === 'local') {
-      if (geminiPath) {
+      if (agyPath) {
         ok(`${color.bold(runner.id)} — local ${runner.id === config.defaultRunner ? color.dim('(default)') : ''}`);
       } else {
-        fail(`${color.bold(runner.id)} — local (gemini not found)`);
+        fail(`${color.bold(runner.id)} — local (agy not found)`);
         issues++;
       }
     } else if (runner.type === 'ssh') {
       const sshResult = testSshRunner(runner);
       if (sshResult.ok) {
-        ok(`${color.bold(runner.id)} — ssh:${runner.host} ${color.dim(`gemini v${sshResult.version}`)} ${runner.id === config.defaultRunner ? color.dim('(default)') : ''}`);
+        ok(`${color.bold(runner.id)} — ssh:${runner.host} ${color.dim(`antigravity v${sshResult.version}`)} ${runner.id === config.defaultRunner ? color.dim('(default)') : ''}`);
       } else {
         fail(`${color.bold(runner.id)} — ssh:${runner.host} — ${sshResult.error}`);
         issues++;
@@ -164,7 +164,7 @@ export function runInit() {
       { id: 'remote', type: 'ssh', host: 'your-server', cwd: '/home/dev/project' },
     ],
     defaultRunner: 'local',
-    defaultModel: 'gemini-3.1-pro-preview',
+    defaultModel: 'default',
   };
 
   fs.writeFileSync(targetPath, JSON.stringify(template, null, 2) + '\n');
@@ -183,20 +183,20 @@ export function printVersion() {
 
 /**
  * Quick prerequisite check before MCP server starts.
- * Only checks gemini binary existence (< 50ms).
+ * Only checks the `agy` binary existence (< 50ms).
  * Outputs to stderr (MCP protocol compatibility).
  *
  * @returns {boolean} true if prerequisites met
  */
 export function validateStartup() {
   try {
-    execFileSync('which', ['gemini'], { encoding: 'utf-8', timeout: 2000 });
+    execFileSync('which', ['agy'], { encoding: 'utf-8', timeout: 2000 });
     return true;
   } catch {
-    console.error('[agent-pool] ❌ Gemini CLI not found in PATH.');
-    console.error(`[agent-pool] Install: npm install -g ${GEMINI_NPM_PACKAGE}`);
-    console.error('[agent-pool] Then run: gemini (to authenticate)');
-    console.error('[agent-pool] Docs: https://github.com/google-gemini/gemini-cli');
+    console.error('[agent-pool] ❌ Antigravity CLI not found in PATH.');
+    console.error(`[agent-pool] Install: ${ANTIGRAVITY_INSTALL_COMMAND}`);
+    console.error('[agent-pool] Then run: agy (to authenticate)');
+    console.error('[agent-pool] Docs: https://antigravity.google/docs/cli');
     return false;
   }
 }
@@ -204,14 +204,14 @@ export function validateStartup() {
 // ─── Helpers ─────────────────────────────────────────────────
 
 /**
- * Test if an SSH runner can connect and run gemini.
+ * Test if an SSH runner can connect and run `agy`.
  * @param {object} runner
  * @returns {{ok: boolean, version?: string, error?: string}}
  */
 function testSshRunner(runner) {
   try {
     const output = execSync(
-      `ssh -o ConnectTimeout=5 -o BatchMode=yes ${runner.host} 'gemini --version' 2>/dev/null`,
+      `ssh -o ConnectTimeout=5 -o BatchMode=yes ${runner.host} 'agy --version' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 10000 }
     ).trim();
     return { ok: true, version: output || 'unknown' };
@@ -280,7 +280,7 @@ export function handleCli(argv) {
 function printHelp() {
   console.log(`
 ${color.bold('agent-pool-mcp')} v${PACKAGE_JSON.version}
-${color.dim('MCP server for multi-agent orchestration via Gemini CLI')}
+${color.dim('MCP server for multi-agent orchestration via Antigravity CLI')}
 
 ${color.cyan('Usage:')}
   agent-pool-mcp              Start MCP server (stdio transport)

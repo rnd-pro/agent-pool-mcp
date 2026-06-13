@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { runGeminiStreaming } from '../runner/gemini-runner.js';
+import { runAntigravityStreaming } from '../runner/antigravity-runner.js';
 import { createTask, completeTask, failTask } from './results.js';
 
 function isNonEmptyString(value) {
@@ -47,7 +47,7 @@ const PEER_REVIEW_SYSTEM_PROMPT = [
 ].join('\n');
 
 /**
- * Consult a Gemini peer agent for architectural review (non-blocking).
+ * Consult an Antigravity peer agent for architectural review (non-blocking).
  * Spawns a streaming task and returns task_id immediately.
  *
  * @param {object} args
@@ -94,7 +94,7 @@ export function consultPeer(args, defaultCwd) {
 
   createTask(taskId, `[peer-review] ${preview(args.proposal, 100)}`, 'Peer is reviewing your proposal. Continue with other work while waiting.', 'plan');
 
-  runGeminiStreaming({
+  runAntigravityStreaming({
     prompt,
     cwd: args.cwd ?? defaultCwd,
     model: args.model,

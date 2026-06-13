@@ -90,13 +90,13 @@ function classifyError(errorText) {
     return '🔄 **Network error.** Check connectivity and retry the task. This is usually transient.';
   }
   if (lower.includes('401') || lower.includes('403') || lower.includes('unauthenticated') || lower.includes('permission denied') || lower.includes('not authenticated')) {
-    return '🔑 **Authentication error.** Run `gemini` in terminal to re-authenticate, then retry.';
+    return '🔑 **Authentication error.** Run `agy` in terminal to re-authenticate, then retry.';
   }
   if (lower.includes('enomem') || lower.includes('out of memory') || lower.includes('heap')) {
     return '💾 **Out of memory.** Too many parallel workers. Cancel some tasks with `cancel_task`, then retry.';
   }
   if (lower.includes('spawn') || lower.includes('enoent')) {
-    return '⚙️ **Gemini CLI not found.** Install: `npm install -g @google/gemini-cli`';
+    return '⚙️ **Antigravity CLI not found.** Install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`';
   }
   return '🔄 **Unexpected error.** You can retry the task with `delegate_task`. If the error persists, try a simpler prompt or check `npx agent-pool-mcp --check`.';
 }
@@ -621,7 +621,7 @@ function formatRunningTaskResult(entry) {
       const toolLines = tools.slice(-3).map((t) => {
         const name = t.tool_name ?? t.name ?? '?';
         const args = t.parameters ?? t.arguments ?? {};
-        // Extract the most meaningful arg — Gemini uses file_path, path, query, etc.
+        // Extract the most meaningful arg — Antigravity uses file_path, path, query, etc.
         const detail = args.file_path ?? args.path ?? args.file ?? args.query ?? args.symbol ?? args.command ?? '';
         let shortDetail = '';
         if (typeof detail === 'string' && detail.length > 0) {
@@ -667,7 +667,7 @@ function formatRunningTaskResult(entry) {
       progress = `\n\n**Progress:**\n${parts.join('\n')}`;
     }
   } else if (parseInt(elapsed) > 10) {
-    progress = '\n\n[WAIT] *Cold start — Gemini CLI initialization takes ~15-20s*';
+    progress = '\n\n[WAIT] *Cold start — Antigravity CLI initialization takes ~15-20s*';
   }
 
   // Time since last event — key diagnostic
@@ -689,10 +689,10 @@ function formatRunningTaskResult(entry) {
 
     // Forward-compatible: extract retry delay if present in stderr.
     // Currently Google SDK does NOT include retryDelayMs in console.error output,
-    // but if Gemini CLI or SDK adds it in the future, this parser will pick it up.
+    // but if Antigravity CLI or SDK adds it in the future, this parser will pick it up.
     // Supported formats:
     // retryDelay: '42s'  (Google API RetryInfo)
-    // retryDelayMs: 42000  (Gemini CLI error object)
+    // retryDelayMs: 42000  (Antigravity CLI error object)
     // Retry-After: 30  (HTTP header)
     let retrySeconds = null;
     const msMatch = raw.match(/retryDelayMs[:"'\s]*(\d+)/i);

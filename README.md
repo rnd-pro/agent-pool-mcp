@@ -4,13 +4,13 @@
 
 # agent-pool-mcp
 
-Multi-agent orchestration via CLI providers (Codex, Gemini, OpenCode, and Claude Code) — parallel task delegation, sequential pipelines, cron scheduling, and cross-model peer review.
+Multi-agent orchestration via CLI providers (Codex, Antigravity, OpenCode, and Claude Code) — parallel task delegation, sequential pipelines, cron scheduling, and cross-model peer review.
 
-Compatible with [Antigravity](https://antigravity.dev), Cursor, Windsurf, Claude Code, and any MCP-enabled coding agent.
+Compatible with [Antigravity](https://antigravity.google), Cursor, Windsurf, Claude Code, and any MCP-enabled coding agent.
 
 Your primary IDE agent delegates background tasks to local CLI workers in parallel — each provider uses its own installed CLI authentication.
 
-When the primary agent and Gemini workers are **different foundation models** (e.g. Claude + Gemini), `consult_peer` gives you cross-model review — two models check each other's reasoning independently.
+When the primary agent and Antigravity workers are **different foundation models** (e.g. Claude + Gemini), `consult_peer` gives you cross-model review — two models check each other's reasoning independently.
 
 ```
 ┌─────────────────────────────────┐
@@ -24,16 +24,16 @@ When the primary agent and Gemini workers are **different foundation models** (e
 └──┬─────────┬─────────┬─────────┘
    │         │         │
    ▼         ▼         ▼
-  codex     gemini    claude       ← CLI workers
+  codex     agy       claude       ← CLI workers
   (task1)   (task2)   (review)       (same auth, parallel)
 ```
 
 > [!TIP]
-> A single $20/month Google AI Ultra subscription can power dozens of parallel workers — no additional API keys required.
+> A Google AI Pro or Ultra subscription can power parallel Antigravity workers — no additional API keys required.
 
 ### Task Delegation
 
-Non-blocking task delegation to Gemini CLI workers. The primary agent fires off a task and continues working — polling for results when ready. Workers get full filesystem access (`delegate_task`) or read-only mode (`delegate_task_readonly`). Cancel anytime with `cancel_task`.
+Non-blocking task delegation to CLI workers. The primary agent fires off a task and continues working — polling for results when ready. Workers get full filesystem access (`delegate_task`) or read-only mode (`delegate_task_readonly`). Cancel anytime with `cancel_task`.
 
 ### Pipelines — Sequential Task Chains
 
@@ -83,21 +83,21 @@ Restrict tool usage for specific tasks using YAML policies:
 
 ### Cross-Model Peer Review
 
-`consult_peer` sends architectural proposals to a Gemini worker for structured review. The worker responds with a verdict: **AGREE**, **SUGGEST_CHANGES**, or **DISAGREE**. Supports iterative rounds until consensus.
+`consult_peer` sends architectural proposals to an Antigravity worker for structured review. The worker responds with a verdict: **AGREE**, **SUGGEST_CHANGES**, or **DISAGREE**. Supports iterative rounds until consensus.
 
 ### Security
 
 - **Path Traversal Protection** — all skill and policy operations are sanitized to prevent access outside designated directories
 - **Process Isolation** — tasks run as detached processes; `cancel_task` and server shutdown kill entire process groups
-- **Credential Safety** — uses your local Gemini CLI authentication; no keys are stored or transmitted
+- **Credential Safety** — uses your local CLI authentication; no keys are stored or transmitted
 
 ## Quick Start
 
 **Prerequisites:** Node.js >= 20 and at least one supported CLI installed and authenticated.
 
 ```bash
-npm install -g @google/gemini-cli
-gemini    # First run: opens browser for OAuth
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+agy       # First run: opens browser for OAuth
 ```
 
 Claude Code tasks use `provider: "claude"` and require the `claude` CLI to be installed and authenticated.
@@ -122,7 +122,7 @@ Restart your IDE — agent-pool-mcp will be downloaded and started automatically
 
 | IDE | Config path |
 |-----|------------|
-| Antigravity | `~/.gemini/antigravity/mcp_config.json` |
+| Antigravity | `~/.gemini/config/mcp_config.json` |
 | Cursor | `.cursor/mcp.json` |
 | Windsurf | `.windsurf/mcp.json` |
 | Claude Code | Run: `claude mcp add agent-pool npx -y agent-pool-mcp` |
@@ -146,7 +146,7 @@ Then use `"command": "agent-pool-mcp"` in your MCP config (no npx needed).
 npx agent-pool-mcp --check
 ```
 
-Runs diagnostics: checks Node.js, Gemini CLI, authentication, and remote runner connectivity.
+Runs diagnostics: checks Node.js, Antigravity CLI, authentication, and remote runner connectivity.
 
 ### CLI
 
@@ -173,7 +173,7 @@ Run workers on remote servers via SSH — same interface, transparent stdio forw
 
 ### Nested Orchestration
 
-Install agent-pool inside Gemini CLI to enable hierarchical delegation — workers can spawn their own workers.
+Install agent-pool inside Antigravity CLI to enable hierarchical delegation — workers can spawn their own workers.
 
 | Variable | Purpose | Default |
 |----------|---------|--------|
@@ -203,7 +203,7 @@ Best used as part of [**mcp-agent-portal**](https://github.com/rnd-pro/mcp-agent
 Also works standalone alongside [**project-graph-mcp**](https://www.npmjs.com/package/project-graph-mcp) — AST-based codebase analysis:
 
 > [!IMPORTANT]
-> Each Gemini CLI worker gets its own MCP server instance but shares pipeline state via filesystem — no coordination overhead.
+> Each Antigravity CLI worker gets its own MCP server instance but shares pipeline state via filesystem — no coordination overhead.
 
 ## Documentation
 

@@ -1,11 +1,11 @@
 ---
 name: parallel-work
-description: Delegation patterns for parallel work between a primary AI agent and Gemini CLI agents via agent-pool MCP. Covers task splitting, sync via shared files, file ownership, timeouts, and consultation protocols.
+description: Delegation patterns for parallel work between a primary AI agent and Antigravity CLI agents via agent-pool MCP. Covers task splitting, sync via shared files, file ownership, timeouts, and consultation protocols.
 ---
 
 # Parallel Work Skill
 
-Orchestrate work between a **primary agent** (e.g. Antigravity/Claude IDE — browser, UI, artifacts) and **Gemini CLI agents** (filesystem, commands, tests, code analysis) via the **agent-pool MCP server**.
+Orchestrate work between a **primary agent** (e.g. Antigravity/Claude IDE — browser, UI, artifacts) and **Antigravity CLI agents** (filesystem, commands, tests, code analysis) via the **agent-pool MCP server**.
 
 ## Agent-Pool Infrastructure
 
@@ -17,10 +17,10 @@ Orchestrate work between a **primary agent** (e.g. Antigravity/Claude IDE — br
 
 ```bash
 # Check running agent processes
-ps aux | grep gemini | grep -v grep | grep -v Chrome
+ps aux | grep agy | grep -v grep | grep -v Chrome
 
 # Kill zombie processes manually
-pkill -f "gemini.*--output-format"
+pkill -f "agy.*-p"
 
 # Test MCP server directly
 node agent-pool-mcp/index.js
@@ -53,19 +53,19 @@ Use `.agent-portal/delegation/` in the project root:
 ## Delegation Patterns
 
 ### Pattern 1: Frontend + Backend Split
-Primary agent handles UI components, Gemini handles server code.
+Primary agent handles UI components, Antigravity handles server code.
 
 ### Pattern 2: Code + Verification Split
-Primary writes code, Gemini runs tests and verifies.
+Primary writes code, Antigravity runs tests and verifies.
 
 ### Pattern 3: Research + Implementation
-Gemini researches (readonly), primary implements based on findings.
+Antigravity researches (readonly), primary implements based on findings.
 
 ### Pattern 4: Multi-File Refactor
 Divide files by ownership, each agent refactors its scope.
 
 ### Pattern 5: Audit + Fix
-Gemini audits (readonly), primary fixes found issues.
+Antigravity audits (readonly), primary fixes found issues.
 
 ### Pattern 6: Peer Consultation
 Use `consult_peer` for architectural decisions before implementation.
@@ -145,11 +145,11 @@ consult_peer({
 
 ## Nested Orchestration
 
-Agent-pool can be installed inside Gemini CLI workers, enabling **hierarchical delegation** — workers can delegate their own sub-tasks.
+Agent-pool can be installed inside Antigravity CLI workers, enabling **hierarchical delegation** — workers can delegate their own sub-tasks.
 
 ### Setup
 
-Add agent-pool as MCP server in Gemini CLI config (`~/.gemini/settings.json`):
+Add agent-pool as MCP server in Antigravity MCP config (`~/.gemini/config/mcp_config.json`):
 
 ```json
 {
@@ -195,7 +195,7 @@ When depth limit is reached, delegation tools return an error instructing the ag
 ### Safety Rules
 
 - Start with `AGENT_POOL_MAX_DEPTH=2` until you understand resource usage
-- Each Gemini CLI process uses ~200-500 MB RAM
+- Each Antigravity CLI process uses about 200-500 MB RAM
 - Use `orchestrator` skill (`--skill orchestrator`) for workers that should sub-delegate
 
 ## Anti-Patterns

@@ -60,7 +60,7 @@ import { homedir } from 'node:os';
 const DEFAULTS = {
   runners: [{ id: 'local', type: 'local' }],
   defaultRunner: 'local',
-  defaultModel: 'gemini-3.1-pro-preview',
+  defaultModel: 'default',
   limits: {
     timeout: 600,
     hardTimeoutMultiplier: 2,
