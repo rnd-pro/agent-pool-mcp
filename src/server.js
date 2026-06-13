@@ -768,6 +768,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
         prompt: args.prompt,
         agent_slug: args.agent_slug || agentDef?.slug || null,
         files: fileHints,
+        focus_graph: args.focus_graph || args.focusGraph || null,
       }, defaultCwd).text;
     } catch (err) {
       resolvedContextPackage = [

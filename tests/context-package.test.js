@@ -177,6 +177,59 @@ Body ${i}`);
     assert.match(workflow.content[0].text, /DEMO WORKFLOW BODY/);
   });
 
+  it('formats compact project graph focus context when provided by the portal', () => {
+    let cwd = makeProject();
+    let { text } = buildResolvedContextPackage({
+      cwd,
+      task: 'update route orchestration',
+      files: ['src/demo.js'],
+      focus_graph: {
+        files: ['src/demo.js'],
+        symbols: [{
+          id: 'DR',
+          name: 'DemoRoute',
+          type: 'C',
+          file: 'src/demo.js',
+          line: 12,
+          methods: ['h'],
+        }],
+        imports: [{
+          file: 'src/demo.js',
+          sources: ['node:path', './service.js'],
+        }],
+        web: [{
+          symbol: 'DR',
+          tag: 'demo-route',
+          file: 'src/demo.js',
+          template: 'src/demo.tpl.js',
+          style: 'src/demo.css.js',
+          children: ['child-card'],
+          events: ['click'],
+          dispatches: ['route-ready'],
+          subscriptions: ['route/items'],
+          bindings: ['onclick:onRouteClick'],
+          tokens: ['--sn-text'],
+        }],
+        dependencies: [{
+          symbol: 'DR',
+          imports: ['node:path'],
+          usedBy: ['App'],
+          calls: ['Svc.handle'],
+          files: ['src/demo.tpl.js', 'src/demo.css.js'],
+          elements: ['CC'],
+        }],
+      },
+    });
+
+    assert.match(text, /Focus files:\n- src\/demo\.js/);
+    assert.match(text, /Focus graph:/);
+    assert.match(text, /DR \(DemoRoute\) type=C file=src\/demo\.js:12 methods=1/);
+    assert.match(text, /src\/demo\.js <- node:path, \.\/service\.js/);
+    assert.match(text, /DR tag=demo-route file=src\/demo\.js template=src\/demo\.tpl\.js style=src\/demo\.css\.js/);
+    assert.match(text, /children=child-card events=click dispatches=route-ready subscriptions=route\/items bindings=onclick:onRouteClick tokens=--sn-text/);
+    assert.match(text, /DR imports=node:path usedBy=App calls=Svc\.handle files=src\/demo\.tpl\.js,src\/demo\.css\.js elements=CC/);
+  });
+
   it('does not read legacy project context, workspace skill, or workspace workflow directories', () => {
     let cwd = makeProject();
     let portal = path.join(cwd, '.agent-portal');

@@ -53,6 +53,7 @@ describe('delegate context orchestration contract', () => {
       assert.deepEqual(schema.context_mode.enum, ['auto', 'off']);
       assert.equal(schema.files.type, 'array');
       assert.equal(schema.files.items.type, 'string');
+      assert.equal(schema.focus_graph.type, 'object');
     }
   });
 

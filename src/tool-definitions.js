@@ -29,6 +29,10 @@ const DELEGATE_CONTEXT_PROPERTIES = {
     items: { type: 'string' },
     description: 'Known relevant file paths used as structured focus hints for context resolution. May include paths attached in the UI.',
   },
+  focus_graph: {
+    type: 'object',
+    description: 'Portal-provided compact project-graph focus context for files[], including symbols, imports, dependencies, and web component summaries when present. Usually injected automatically; direct callers should prefer files[].',
+  },
 };
 
 const CODEX_REASONING_EFFORT_PROPERTY = {
