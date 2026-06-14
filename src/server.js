@@ -699,6 +699,10 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
 
   if (resourceGroupName && !resourceGroup) {
     console.error(`[agent-pool] Resource group '${resourceGroupName}' not found in local portal resource groups`);
+    return {
+      content: [{ type: 'text', text: `❌ Resource group \`${resourceGroupName}\` not found. Use \`list_groups\` to see available groups.` }],
+      isError: true,
+    };
   }
 
   if (resourceGroup?.max_agents) {
