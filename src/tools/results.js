@@ -14,7 +14,7 @@ import {
 } from '../runner/process-manager.js';
 import { getBoardStore } from './board-store.js';
 
-/** @type {Map<string, {cwd: string, status: string, prompt: string, approvalMode: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null}>} */
+/** @type {Map<string, {cwd: string, status: string, prompt: string, approvalMode: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null, liveEvents: object[], lastEventAt: number|null}>} */
 const taskStore = new Map();
 
 /** Max number of live events to keep per task (ring buffer) */
@@ -57,6 +57,7 @@ function getTaskMeta(taskId) {
     completedAt: entry.completedAt,
     error: entry.error,
     eventCount: entry.liveEvents?.length ?? 0,
+    lastEventAt: entry.lastEventAt,
     chatId: entry.chatId,
     parentId: entry.parentId,
     agentSlug: entry.agentSlug,
@@ -535,6 +536,8 @@ function buildTaskList() {
       startedAt: entry.startedAt,
       completedAt: entry.completedAt,
       elapsedMs: Date.now() - entry.startedAt,
+      eventCount: entry.liveEvents?.length ?? 0,
+      lastEventAt: entry.lastEventAt,
       runner: entry.runner,
       skill: entry.skill,
       model: entry.model,

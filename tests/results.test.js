@@ -33,6 +33,7 @@ describe('task results', () => {
     removeTask('finish-done-task');
     removeTask('list-tracked-task');
     removeTask('list-nochildren-task');
+    removeTask('list-event-task');
     untrackChild(2147484001);
     untrackChild(2147484002);
     untrackChild(2147484003);
@@ -194,6 +195,31 @@ describe('task results', () => {
     assert.equal(tracked.trackedChildren.length, 2);
     assert.ok(tracked.trackedChildren.every((c) => typeof c.pid === 'number' && typeof c.label === 'string' && typeof c.elapsedMs === 'number'));
     assert.equal(nochildren.trackedChildren.length, 0);
+  });
+
+  it('exposes safe event counters in listTaskState without raw live diagnostics', () => {
+    fs.mkdirSync(TEST_CWD, { recursive: true });
+    createTask('list-event-task', 'task with events', null, 'plan', TEST_CWD);
+
+    let before = listTaskState().tasks.find((t) => t.id === 'list-event-task');
+    assert.equal(before.eventCount, 0);
+    assert.equal(before.lastEventAt, null);
+    assert.equal('liveEvents' in before, false);
+    assert.equal('stderr' in before, false);
+
+    pushTaskEvent('list-event-task', {
+      type: 'tool_use',
+      tool_name: 'read_file',
+      parameters: { path: 'src/index.js' },
+    });
+    pushTaskStderr('list-event-task', 'secret stderr diagnostics');
+
+    let afterEvent = listTaskState().tasks.find((t) => t.id === 'list-event-task');
+    assert.equal(afterEvent.eventCount, 1);
+    assert.equal(typeof afterEvent.lastEventAt, 'number');
+    assert.equal('liveEvents' in afterEvent, false);
+    assert.equal('stderr' in afterEvent, false);
+    assert.equal(JSON.stringify(afterEvent).includes('secret stderr diagnostics'), false);
   });
 
   it('detects stale tracked processes when taskStore has no matching entry', () => {
