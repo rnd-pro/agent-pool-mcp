@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resetConfig } from '../src/runner/config.js';
 
 let oldPath;
 let oldArgsFile;
 let oldStderr;
 let oldPortalMcpUrl;
+let oldRunnerMode;
+let oldCwd;
 let tmpDir;
 
 describe('codex runner', () => {
@@ -16,6 +19,8 @@ describe('codex runner', () => {
     oldArgsFile = process.env.CODEX_RUNNER_ARGS_FILE;
     oldStderr = process.env.CODEX_RUNNER_STDERR;
     oldPortalMcpUrl = process.env.PORTAL_MCP_URL;
+    oldRunnerMode = process.env.CODEX_RUNNER_MODE;
+    oldCwd = process.cwd();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-runner-test-'));
 
     let binPath = path.join(tmpDir, 'codex');
@@ -27,13 +32,19 @@ if (process.env.CODEX_RUNNER_ARGS_FILE) {
 if (process.env.CODEX_RUNNER_STDERR) {
   process.stderr.write(process.env.CODEX_RUNNER_STDERR);
 }
-const events = [
-  { type: 'thread.started', thread_id: 'thread-test' },
-  { type: 'item.completed', item: { type: 'command_execution', command: 'pwd', aggregated_output: 'ok', exit_code: 0, status: 'completed' } },
-  { type: 'item.completed', item: { type: 'agent_message', text: 'Codex response' } },
-  { type: 'turn.completed', usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 2, reasoning_output_tokens: 3 } }
-];
-for (const event of events) console.log(JSON.stringify(event));
+if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
+  console.log(JSON.stringify({ type: 'session_meta', payload: {} }));
+  console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }));
+  setInterval(() => {}, 1000);
+} else {
+  const events = [
+    { type: 'thread.started', thread_id: 'thread-test' },
+    { type: 'item.completed', item: { type: 'command_execution', command: 'pwd', aggregated_output: 'ok', exit_code: 0, status: 'completed' } },
+    { type: 'item.completed', item: { type: 'agent_message', text: 'Codex response' } },
+    { type: 'turn.completed', usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 2, reasoning_output_tokens: 3 } }
+  ];
+  for (const event of events) console.log(JSON.stringify(event));
+}
 `);
     fs.chmodSync(binPath, 0o755);
     process.env.PATH = `${tmpDir}${path.delimiter}${oldPath}`;
@@ -56,6 +67,13 @@ for (const event of events) console.log(JSON.stringify(event));
     } else {
       process.env.PORTAL_MCP_URL = oldPortalMcpUrl;
     }
+    if (oldRunnerMode === undefined) {
+      delete process.env.CODEX_RUNNER_MODE;
+    } else {
+      process.env.CODEX_RUNNER_MODE = oldRunnerMode;
+    }
+    process.chdir(oldCwd);
+    resetConfig();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -84,6 +102,29 @@ for (const event of events) console.log(JSON.stringify(event));
     let result = await runCodexStreaming({ prompt: 'hello', cwd: tmpDir, timeout: 5 });
 
     assert.deepEqual(result.errors, []);
+  });
+
+  it('fails and kills Codex when bootstrap output never becomes substantive', async () => {
+    process.env.CODEX_RUNNER_MODE = 'bootstrap-stall';
+    fs.writeFileSync(path.join(tmpDir, 'agent-pool.config.json'), JSON.stringify({
+      limits: {
+        bootstrapTimeout: 0.2,
+        timeout: 5,
+      },
+    }));
+    process.chdir(tmpDir);
+    resetConfig();
+
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+    let startedAt = Date.now();
+    let result = await runCodexStreaming({ prompt: 'hello', cwd: tmpDir, timeout: 5 });
+
+    assert.equal(result.bootstrapStalled, true);
+    assert.equal(result.exitCode, -1);
+    assert.equal(result.softTimeout, false);
+    assert.ok(result.totalEvents <= 2);
+    assert.match(result.errors.join('\n'), /Codex bootstrap stalled/);
+    assert.ok(Date.now() - startedAt < 2000);
   });
 
   it('does not pass the UI default sentinel as a real model', async () => {
@@ -134,7 +175,7 @@ for (const event of events) console.log(JSON.stringify(event));
     assert.notEqual(configIndex, -1);
     assert.equal(
       args[configIndex + 1],
-      'mcp_servers.agent-portal={url="http://127.0.0.1:52395/mcp?transport=stream&chatId=chat%20123"}',
+      'mcp_servers.agent-portal-chat={url="http://127.0.0.1:52395/mcp?transport=stream&chatId=chat%20123"}',
     );
   });
 

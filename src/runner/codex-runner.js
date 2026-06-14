@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { trackChild, untrackChild } from './process-manager.js';
+import { killGroup, trackChild, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
 import { createProcessWatchdog } from './timeout-manager.js';
@@ -75,6 +75,9 @@ function sandboxMode(approvalMode) {
 }
 
 const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const CODEX_CHAT_MCP_SERVER = 'agent-portal-chat';
+const CODEX_BOOTSTRAP_IGNORED_EVENT_TYPES = new Set(['session_meta']);
+const CODEX_BOOTSTRAP_IGNORED_PAYLOAD_TYPES = new Set(['task_started']);
 
 function normalizeReasoningEffort(value) {
   let normalized = typeof value === 'string' ? value.trim() : '';
@@ -84,6 +87,22 @@ function normalizeReasoningEffort(value) {
 
 function tomlString(value) {
   return JSON.stringify(String(value));
+}
+
+function isBootstrapProgressEvent(event) {
+  if (!event || typeof event !== 'object') return false;
+  if (CODEX_BOOTSTRAP_IGNORED_EVENT_TYPES.has(event.type)) return false;
+  if (event.type === 'event_msg') {
+    let payloadType = event.payload?.type;
+    return Boolean(payloadType && !CODEX_BOOTSTRAP_IGNORED_PAYLOAD_TYPES.has(payloadType));
+  }
+  return true;
+}
+
+function bootstrapTimeoutMs(config) {
+  let seconds = Number(config.limits.bootstrapTimeout ?? 120);
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return seconds * 1000;
 }
 
 export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approvalMode, timeout, sessionId, taskId, chat_id }) {
@@ -118,7 +137,7 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
     let portalUrl = resolvePortalUrl();
     if (portalUrl && chat_id) {
       portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(chat_id);
-      args.push('-c', `mcp_servers.agent-portal={url=${tomlString(portalUrl)}}`);
+      args.push('-c', `mcp_servers.${CODEX_CHAT_MCP_SERVER}={url=${tomlString(portalUrl)}}`);
     }
     if (sessionId) {
       args.push(sessionId);
@@ -160,9 +179,12 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
     let buffer = '';
     let resolved = false;
     let hasReceivedData = false;
+    let bootstrapTimer = null;
+    let bootstrapStalled = false;
 
     let watchdog = createProcessWatchdog(timeoutMs, () => {
       resolved = true;
+      stopBootstrapWatchdog();
       let responseText = extractResponseText(events);
       resolve({
         sessionId: extractThreadId(events),
@@ -178,10 +200,61 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
       });
     }, config, child);
 
+    function stopBootstrapWatchdog() {
+      if (!bootstrapTimer) return;
+      clearTimeout(bootstrapTimer);
+      bootstrapTimer = null;
+    }
+
+    function failBootstrapStall() {
+      if (resolved) return;
+      resolved = true;
+      bootstrapStalled = true;
+      if (watchdog) watchdog.stop();
+      stopBootstrapWatchdog();
+
+      let seconds = Number(config.limits.bootstrapTimeout ?? 120);
+      let stderrTail = stderrData.trim().split('\n').filter(Boolean).slice(-3).join('\n');
+      let details = stderrTail ? ` Last stderr:\n${stderrTail}` : '';
+      let errMsg = `Codex bootstrap stalled: no substantive JSONL event within ${seconds}s.${details}`;
+
+      killGroup(child.pid);
+
+      if (taskId) {
+        pushTaskStderr(taskId, `${errMsg}\n`);
+        pushTaskEvent(taskId, {
+          type: 'error',
+          message: errMsg,
+          error: errMsg,
+        });
+      }
+
+      resolve({
+        sessionId: extractThreadId(events),
+        response: '',
+        stats: extractStats(events),
+        toolCalls: extractToolCalls(events),
+        toolResults: extractToolResults(events),
+        errors: [errMsg].concat(filteredStderrErrors(stderrData)),
+        exitCode: -1,
+        totalEvents: events.length,
+        softTimeout: false,
+        bootstrapStalled: true,
+        timeoutSeconds: seconds,
+      });
+    }
+
+    let bootstrapMs = bootstrapTimeoutMs(config);
+    if (bootstrapMs > 0) {
+      bootstrapTimer = setTimeout(failBootstrapStall, bootstrapMs);
+      bootstrapTimer.unref?.();
+    }
+
     child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
       if (watchdog) watchdog.stop();
+      stopBootstrapWatchdog();
 
       let errMsg = `Failed to start codex process: ${err.message}`;
       if (taskId) pushTaskStderr(taskId, errMsg);
@@ -220,6 +293,7 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
         try {
           let parsed = JSON.parse(trimmed);
           events.push(parsed);
+          if (isBootstrapProgressEvent(parsed)) stopBootstrapWatchdog();
 
           if (taskId) {
             let normalized = normalizeCodexEvent(parsed);
@@ -246,6 +320,7 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
 
     child.on('close', (code) => {
       if (watchdog) watchdog.stop();
+      stopBootstrapWatchdog();
       untrackChild(child.pid);
 
       if (buffer.trim()) {
@@ -268,7 +343,7 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
       };
 
       if (resolved) {
-        if (taskId) updateTaskResult(taskId, result);
+        if (taskId && !bootstrapStalled) updateTaskResult(taskId, result);
         return;
       }
 

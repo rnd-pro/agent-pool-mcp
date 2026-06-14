@@ -27,6 +27,7 @@ import { homedir } from 'node:os';
 /**
  * @typedef {object} LimitsConfig
  * @property {number} timeout - Soft timeout in seconds (default: 600)
+ * @property {number} bootstrapTimeout - Max seconds without a substantive runner event after spawn.
  * @property {number} hardTimeoutMultiplier - Hard timeout = timeout × this (default: 2)
  * @property {number} hardTimeoutMax - Hard timeout cap in seconds (default: 1800)
  * @property {number} maxSteps - Max agent steps per task before kill (default: 50)
@@ -63,6 +64,7 @@ const DEFAULTS = {
   defaultModel: 'default',
   limits: {
     timeout: 600,
+    bootstrapTimeout: 120,
     hardTimeoutMultiplier: 2,
     hardTimeoutMax: 1800,
     maxSteps: 50,

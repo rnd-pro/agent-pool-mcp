@@ -82,6 +82,9 @@ function getTaskMeta(taskId) {
 function classifyError(errorText) {
   const lower = errorText.toLowerCase();
 
+  if (lower.includes('bootstrap stalled') || lower.includes('no substantive jsonl event')) {
+    return '🔄 **Bootstrap stalled.** Retry the task; if it repeats, inspect Codex CLI auth, stale session state, and the runner stderr.';
+  }
   if (lower.includes('429') || lower.includes('too many requests') || lower.includes('rate limit') ||
       lower.includes('quota') || lower.includes('resource_exhausted') || lower.includes('resource exhausted')) {
     return '🔄 **Rate limited.** Wait 30-60 seconds, then retry the same task with `delegate_task`.';
@@ -760,6 +763,9 @@ function formatCompletedTaskResult(entry) {
   // Soft timeout indicator
   if (result.softTimeout) {
     sections.push(`> [WAIT] **Soft timeout** reached after ${result.timeoutSeconds}s. Process may still be running — partial result below.`);
+  }
+  if (result.bootstrapStalled) {
+    sections.push(`> [ERR] **Bootstrap stalled** after ${result.timeoutSeconds}s. The runner killed the process because Codex did not emit a substantive JSONL event.`);
   }
 
   // Agent failed to produce a response (either non-zero exit or caught error)
