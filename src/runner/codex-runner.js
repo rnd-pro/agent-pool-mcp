@@ -312,7 +312,8 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
     });
 
     child.stderr.on('data', (chunk) => {
-      if (watchdog) watchdog.kick();
+      // Stderr can contain repeated diagnostics while Codex is otherwise stalled.
+      // Only JSONL stdout events count as substantive progress for the inactivity watchdog.
       let text = chunk.toString();
       stderrData += text;
       if (taskId) pushTaskStderr(taskId, text);

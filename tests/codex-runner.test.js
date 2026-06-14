@@ -36,6 +36,9 @@ if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
   console.log(JSON.stringify({ type: 'session_meta', payload: {} }));
   console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }));
   setInterval(() => {}, 1000);
+} else if (process.env.CODEX_RUNNER_MODE === 'stderr-after-start') {
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-test' }));
+  setInterval(() => process.stderr.write('still waiting on stderr\\n'), 50);
 } else {
   const events = [
     { type: 'thread.started', thread_id: 'thread-test' },
@@ -125,6 +128,29 @@ if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
     assert.ok(result.totalEvents <= 2);
     assert.match(result.errors.join('\n'), /Codex bootstrap stalled/);
     assert.ok(Date.now() - startedAt < 2000);
+  });
+
+  it('does not treat stderr-only noise as Codex progress after bootstrap', async () => {
+    process.env.CODEX_RUNNER_MODE = 'stderr-after-start';
+    fs.writeFileSync(path.join(tmpDir, 'agent-pool.config.json'), JSON.stringify({
+      limits: {
+        bootstrapTimeout: 1,
+        timeout: 0.2,
+        hardTimeoutMultiplier: 3,
+        hardTimeoutMax: 2,
+      },
+    }));
+    process.chdir(tmpDir);
+    resetConfig();
+
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+    let startedAt = Date.now();
+    let result = await runCodexStreaming({ prompt: 'hello', cwd: tmpDir, timeout: 0.2 });
+
+    assert.equal(result.softTimeout, true);
+    assert.equal(result.exitCode, null);
+    assert.equal(result.bootstrapStalled, undefined);
+    assert.ok(Date.now() - startedAt < 1500);
   });
 
   it('does not pass the UI default sentinel as a real model', async () => {

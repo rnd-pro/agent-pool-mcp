@@ -263,7 +263,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     });
 
     child.stderr.on('data', (chunk) => {
-      if (watchdog) watchdog.kick();
+      // Stderr is diagnostic output, not proof of substantive agent progress.
       let text = chunk.toString();
       // Filter out opencode INFO lines — they're noisy and not errors
       if (!text.startsWith('INFO ')) {

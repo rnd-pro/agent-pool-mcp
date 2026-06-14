@@ -201,7 +201,7 @@ export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, 
     });
 
     child.stderr.on('data', (chunk) => {
-      if (watchdog) watchdog.kick();
+      // Stderr is diagnostic output, not proof of substantive agent progress.
       let text = chunk.toString();
       stderrData += text;
       if (taskId) pushTaskStderr(taskId, text);

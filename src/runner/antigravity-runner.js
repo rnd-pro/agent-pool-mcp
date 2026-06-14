@@ -282,7 +282,7 @@ export function runAntigravityStreaming({ prompt, cwd, model, approvalMode, time
     });
 
     child.stderr.on('data', (chunk) => {
-      if (watchdog) watchdog.kick();
+      // Stderr is diagnostic output, not proof of substantive agent progress.
       let msg = chunk.toString();
       stderrData += msg;
       if (taskId) pushTaskStderr(taskId, msg);
