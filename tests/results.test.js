@@ -222,6 +222,21 @@ describe('task results', () => {
     assert.equal(JSON.stringify(afterEvent).includes('secret stderr diagnostics'), false);
   });
 
+  it('exposes bounded system load and capacity in listTaskState', () => {
+    fs.mkdirSync(TEST_CWD, { recursive: true });
+    createTask('list-system-load-task', 'task with system load', null, 'plan', TEST_CWD);
+
+    const result = listTaskState();
+
+    assert.equal(result.systemLoad.capacity.runningTaskCount >= 1, true);
+    assert.equal(typeof result.systemLoad.cpu.count, 'number');
+    assert.equal(typeof result.systemLoad.memory.totalBytes, 'number');
+    assert.equal(typeof result.systemLoad.capacity.state, 'string');
+    assert.equal(typeof result.systemLoad.capacity.recommendedMaxParallelTasks, 'number');
+    assert.equal('liveEvents' in result.systemLoad, false);
+    assert.equal('stderr' in result.systemLoad, false);
+  });
+
   it('detects stale tracked processes when taskStore has no matching entry', () => {
     fs.mkdirSync(TEST_CWD, { recursive: true });
     trackChild(2147484003, 'stale-orphan-task', 'orphan');

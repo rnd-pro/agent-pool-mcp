@@ -8,6 +8,7 @@
  */
 
 import { execSync } from 'node:child_process';
+import os from 'node:os';
 
 /** @type {Map<number, {taskId: string, startTime: number, label: string}>} */
 const children = new Map();
@@ -137,7 +138,7 @@ export function listChildren() {
  * Get system-wide Antigravity process load.
  * Counts all `agy` processes on the system, separating ours from external.
  *
- * @returns {{total: number, ours: number, external: number, warning: string|null}}
+ * @returns {{total: number, ours: number, external: number, warning: string|null, cpu: object, memory: object, capacity: object}}
  */
 export function getSystemLoad() {
   let total = 0;
@@ -155,13 +156,59 @@ export function getSystemLoad() {
 
   const ours = children.size;
   const external = Math.max(0, total - ours);
+  const cpuCount = os.cpus().length || 1;
+  const loadAverage = os.loadavg();
+  const loadRatio1m = loadAverage[0] / cpuCount;
+  const totalMemoryBytes = os.totalmem();
+  const freeMemoryBytes = os.freemem();
+  const usedMemoryRatio = totalMemoryBytes > 0
+    ? (totalMemoryBytes - freeMemoryBytes) / totalMemoryBytes
+    : null;
 
   let warning = null;
   if (external > 0) {
     warning = `⚠️ System load: ${external} other Antigravity process${external > 1 ? 'es' : ''} running — responses may be slower.`;
   }
 
-  return { total, ours, external, warning };
+  let state = 'available';
+  let reason = null;
+  if (usedMemoryRatio !== null && usedMemoryRatio >= 0.9) {
+    state = 'constrained';
+    reason = 'memory';
+  } else if (loadRatio1m >= 1.5) {
+    state = 'constrained';
+    reason = 'cpu';
+  } else if (loadRatio1m >= 1 || external > 0) {
+    state = 'busy';
+    reason = external > 0 ? 'external_agents' : 'cpu';
+  }
+
+  return {
+    total,
+    ours,
+    external,
+    warning,
+    cpu: {
+      count: cpuCount,
+      loadAvg1m: loadAverage[0],
+      loadAvg5m: loadAverage[1],
+      loadAvg15m: loadAverage[2],
+      loadRatio1m,
+    },
+    memory: {
+      totalBytes: totalMemoryBytes,
+      freeBytes: freeMemoryBytes,
+      usedRatio: usedMemoryRatio,
+    },
+    process: {
+      trackedChildren: ours,
+    },
+    capacity: {
+      state,
+      reason,
+      recommendedMaxParallelTasks: Math.max(1, Math.floor(cpuCount / 2)),
+    },
+  };
 }
 
 // Cleanup on exit signals

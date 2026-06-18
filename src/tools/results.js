@@ -516,7 +516,21 @@ export function listAllTasks() {
  * @returns {{tasks: Array, staleProcesses: Array}} Task state and stale tracked processes
  */
 export function listTaskState() {
-  return buildTaskList();
+  const taskList = buildTaskList();
+  const runningTaskCount = taskList.tasks.filter((task) => task.status === 'running').length;
+  const systemLoad = getSystemLoad();
+  return {
+    ...taskList,
+    systemLoad: {
+      ...systemLoad,
+      capacity: {
+        ...(systemLoad.capacity || {}),
+        runningTaskCount,
+        staleProcessCount: taskList.staleProcesses.length,
+        trackedChildCount: systemLoad.process?.trackedChildren ?? systemLoad.ours ?? 0,
+      },
+    },
+  };
 }
 
 function buildTaskList() {
