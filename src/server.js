@@ -699,17 +699,29 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
 
   if (resourceGroupName && !resourceGroup) {
     console.error(`[agent-pool] Resource group '${resourceGroupName}' not found in local portal resource groups`);
+    let summary = buildAvailableGroupsSummary(cwd, { requestedCount: 1 });
+    let text = `❌ Resource group \`${resourceGroupName}\` not found.${summary}`;
     return {
-      content: [{ type: 'text', text: `❌ Resource group \`${resourceGroupName}\` not found. Use \`list_groups\` to see available groups.` }],
+      content: [{ type: 'text', text }],
       isError: true,
     };
   }
 
   if (resourceGroup?.max_agents) {
-    const groupActiveCount = listAllTasks().filter((t) => t.status === 'running' && t.resourceGroup === resourceGroupName).length;
+    let groupActiveCount = getGroupActiveCount(resourceGroupName);
     if (groupActiveCount >= resourceGroup.max_agents) {
+      let summary = buildAvailableGroupsSummary(cwd, {
+        excludeName: resourceGroupName,
+        requestedCount: 1,
+      });
+      let text = [
+        `⚠️ Resource group \`${resourceGroupName}\` is at capacity`,
+        `(${groupActiveCount}/${resourceGroup.max_agents} active tasks).`,
+        `Wait for an existing task in this group to complete,`,
+        `or use an available alternative.${summary}`,
+      ].join(' ');
       return {
-        content: [{ type: 'text', text: `⚠️ Resource group \`${resourceGroupName}\` is at capacity (${groupActiveCount}/${resourceGroup.max_agents} active tasks). Wait for an existing task in this group to complete or choose another group.` }],
+        content: [{ type: 'text', text }],
         isError: true,
       };
     }
@@ -1390,6 +1402,97 @@ function handleGetUsageGuide(args) {
   return { content: [{ type: 'text', text: topicContent.join('\n').trim() }] };
 }
 
+// ─── Group Helpers ──────────────────────────────────────────────
+
+/**
+ * @param {string} cwd
+ * @param {{ excludeName?: string, requestedCount?: number }} [options]
+ * @returns {string}
+ */
+function buildAvailableGroupsSummary(cwd, options = {}) {
+  let requestedCount = Math.max(1, Number(options.requestedCount) || 1);
+  let groups = [];
+  try {
+    groups = listGroups(cwd);
+  } catch {
+    return '';
+  }
+  if (options.excludeName) {
+    groups = groups.filter(g => g.name !== options.excludeName);
+  }
+  if (groups.length === 0) {
+    return options.excludeName
+      ? '\n\nNo other resource groups are available in this workspace.'
+      : '\n\nNo resource groups are defined in this workspace. Use `create_group` to create one.';
+  }
+
+  let availableGroups = groups.filter((group) => groupHasCapacity(group, requestedCount));
+  if (availableGroups.length === 0) {
+    return options.excludeName
+      ? '\n\nNo other resource groups currently have capacity in this workspace.'
+      : '\n\nNo resource groups currently have capacity in this workspace.';
+  }
+
+  let lines = availableGroups.map((group) => {
+    let details = formatGroupFallbackDetails(group);
+    return details ? `  - \`${group.name}\` (${details})` : `  - \`${group.name}\``;
+  });
+  return `\n\nAvailable resource groups (${availableGroups.length}):\n${lines.join('\n')}`;
+}
+
+/**
+ * @param {object} group
+ * @param {number} requestedCount
+ * @returns {boolean}
+ */
+function groupHasCapacity(group, requestedCount) {
+  if (!group.max_agents) return true;
+  return getGroupActiveCount(group.name) + requestedCount <= group.max_agents;
+}
+
+/**
+ * @param {string} name
+ * @returns {number}
+ */
+function getGroupActiveCount(name) {
+  return listAllTasks()
+    .filter((task) => task.status === 'running' && task.resourceGroup === name)
+    .length;
+}
+
+/**
+ * @param {object} group
+ * @returns {string}
+ */
+function formatGroupFallbackDetails(group) {
+  let parts = [];
+  if (group.provider) parts.push(`provider: ${group.provider}`);
+  if (group.model) parts.push(`model: ${group.model}`);
+  if (Array.isArray(group.profiles) && group.profiles.length > 0) {
+    let profiles = group.profiles
+      .map((profile) => formatProfileFallback(profile, group))
+      .filter(Boolean);
+    if (profiles.length > 0) {
+      parts.push(`fallback: ${profiles.join(' -> ')}`);
+    }
+  }
+  if (group.max_agents) {
+    parts.push(`capacity: ${getGroupActiveCount(group.name)}/${group.max_agents}`);
+  }
+  return parts.join(', ');
+}
+
+/**
+ * @param {object} profile
+ * @param {object} group
+ * @returns {string}
+ */
+function formatProfileFallback(profile, group) {
+  let provider = profile.provider || group.provider || DEFAULT_PROVIDER;
+  let model = profile.model || group.model || 'default';
+  return `${provider}/${model}`;
+}
+
 // ─── Group Handlers ─────────────────────────────────────────────
 
 /**
@@ -1498,8 +1601,10 @@ function handleDelegateToGroup(args) {
   const group = getGroup(cwd, args.group);
 
   if (!group) {
+    let summary = buildAvailableGroupsSummary(cwd, { requestedCount: args.count ?? 1 });
+    let text = `❌ Group \`${args.group}\` not found.${summary}`;
     return {
-      content: [{ type: 'text', text: `❌ Group \`${args.group}\` not found. Use \`list_groups\` to see available groups.` }],
+      content: [{ type: 'text', text }],
       isError: true,
     };
   }
@@ -1508,10 +1613,18 @@ function handleDelegateToGroup(args) {
 
   // Check max_agents limit
   if (group.max_agents && count > group.max_agents) {
+    let summary = buildAvailableGroupsSummary(cwd, {
+      excludeName: args.group,
+      requestedCount: count,
+    });
+    let text = [
+      `❌ Requested ${count} agents but group \`${args.group}\` allows max`,
+      `${group.max_agents}.${summary}`,
+    ].join(' ');
     return {
       content: [{
         type: 'text',
-        text: `❌ Requested ${count} agents but group \`${args.group}\` allows max ${group.max_agents}.`,
+        text,
       }],
       isError: true,
     };

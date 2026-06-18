@@ -9,9 +9,17 @@ const TEST_HOME = path.join(TEST_CWD, 'portal-home');
 
 describe('groups.js', () => {
   let createGroup, listGroups, getGroup, deleteGroup, getGroupNextProfile;
+  let createTask, completeTask;
+  let callTool;
+  let previousConfigDir;
+  let previousPoolDepth;
 
   before(async () => {
+    previousConfigDir = process.env.AGENT_PORTAL_CONFIG_DIR;
+    previousPoolDepth = process.env.AGENT_POOL_DEPTH;
     process.env.AGENT_PORTAL_CONFIG_DIR = TEST_HOME;
+    process.env.AGENT_POOL_DEPTH = '0';
+
     const mod = await import('../src/tools/groups.js');
     createGroup = mod.createGroup;
     listGroups = mod.listGroups;
@@ -19,13 +27,37 @@ describe('groups.js', () => {
     deleteGroup = mod.deleteGroup;
     getGroupNextProfile = mod.getGroupNextProfile;
 
+    let serverMod = await import('../src/server.js');
+    let resultsMod = await import('../src/tools/results.js');
+    createTask = resultsMod.createTask;
+    completeTask = resultsMod.completeTask;
+    resultsMod.setNotifyCallback(null);
+
+    let server = serverMod.createServer();
+    let handler = server._requestHandlers.get('tools/call');
+    assert.equal(typeof handler, 'function');
+    resultsMod.setNotifyCallback(null);
+    callTool = (name, args) => handler({
+      method: 'tools/call',
+      params: { name, arguments: args },
+    }, {});
+
     if (!fs.existsSync(TEST_CWD)) {
       fs.mkdirSync(TEST_CWD, { recursive: true });
     }
   });
 
   after(() => {
-    delete process.env.AGENT_PORTAL_CONFIG_DIR;
+    if (previousConfigDir === undefined) {
+      delete process.env.AGENT_PORTAL_CONFIG_DIR;
+    } else {
+      process.env.AGENT_PORTAL_CONFIG_DIR = previousConfigDir;
+    }
+    if (previousPoolDepth === undefined) {
+      delete process.env.AGENT_POOL_DEPTH;
+    } else {
+      process.env.AGENT_POOL_DEPTH = previousPoolDepth;
+    }
     if (fs.existsSync(TEST_CWD)) {
       fs.rmSync(TEST_CWD, { recursive: true, force: true });
     }
@@ -123,6 +155,100 @@ describe('groups.js', () => {
     assert.ok(list.find(g => g.name === 'test-group'));
   });
 
+  it('listGroups returns fields needed for error-reporting summary', () => {
+    let list = listGroups(TEST_CWD);
+    for (let g of list) {
+      assert.strictEqual(typeof g.name, 'string', 'group must expose name');
+      assert.ok(g.name.length > 0, 'group name must be non-empty');
+      assert.ok('provider' in g, 'group must expose provider field');
+      assert.ok('model' in g, 'group must expose model field');
+    }
+  });
+
+  it('delegate_task missing resource_group reports defined alternatives', async () => {
+    createGroup(TEST_CWD, {
+      name: 'report-available',
+      provider: 'mock',
+      model: 'stable',
+    });
+
+    let response = await callTool('delegate_task', {
+      cwd: TEST_CWD,
+      provider: 'mock',
+      resource_group: 'missing-report-group',
+      prompt: 'probe missing resource group',
+    });
+    let text = response.content[0].text;
+
+    assert.equal(response.isError, true);
+    assert.match(text, /Resource group `missing-report-group` not found/);
+    assert.match(text, /Available resource groups/);
+    assert.match(text, /`report-available` \(provider: mock, model: stable\)/);
+    assert.doesNotMatch(text, /  - `missing-report-group`/);
+    assert.doesNotMatch(text, /Use `list_groups`/);
+  });
+
+  it('delegate_task saturated resource_group reports only groups with capacity', async () => {
+    createGroup(TEST_CWD, {
+      name: 'saturated-primary',
+      provider: 'mock',
+      max_agents: 1,
+    });
+    createGroup(TEST_CWD, {
+      name: 'saturated-secondary',
+      provider: 'mock',
+      max_agents: 1,
+    });
+    createGroup(TEST_CWD, {
+      name: 'capacity-fallback',
+      provider: 'mock',
+      max_agents: 2,
+      profiles: [
+        { provider: 'mock', model: 'fallback-primary' },
+        { provider: 'mock', model: 'fallback-secondary' },
+      ],
+    });
+
+    createTask('running-saturated-primary', 'primary', null, 'plan', TEST_CWD,
+      'test', null, null, null, null, 'saturated-primary');
+    createTask('running-saturated-secondary', 'secondary', null, 'plan', TEST_CWD,
+      'test', null, null, null, null, 'saturated-secondary');
+
+    try {
+      let response = await callTool('delegate_task', {
+        cwd: TEST_CWD,
+        provider: 'mock',
+        resource_group: 'saturated-primary',
+        prompt: 'probe saturated resource group',
+      });
+      let text = response.content[0].text;
+
+      assert.equal(response.isError, true);
+      assert.match(
+        text,
+        /Resource group `saturated-primary` is at capacity \(1\/1 active tasks\)/,
+      );
+      assert.match(text, /Available resource groups/);
+      assert.match(text, /`capacity-fallback`/);
+      assert.match(text, /fallback: mock\/fallback-primary -> mock\/fallback-secondary/);
+      assert.match(text, /capacity: 0\/2/);
+      assert.doesNotMatch(text, /`saturated-secondary`/);
+    } finally {
+      completeTask('running-saturated-primary', { exitCode: 0, response: '' });
+      completeTask('running-saturated-secondary', { exitCode: 0, response: '' });
+    }
+  });
+
+  it('getGroup returns null for non-existent group', () => {
+    let g = getGroup(TEST_CWD, 'nonexistent-group');
+    assert.strictEqual(g, null);
+  });
+
+  it('getGroupNextProfile returns null provider/model for missing group', () => {
+    let profile = getGroupNextProfile(TEST_CWD, 'nonexistent-group');
+    assert.deepStrictEqual(profile, { provider: null, model: null, profile: null });
+  });
+
   it('deleteGroup removes the group', () => {
     const deleted = deleteGroup(TEST_CWD, 'error-group');
     assert.strictEqual(deleted, true);
@@ -131,6 +257,8 @@ describe('groups.js', () => {
     assert.strictEqual(group, null);
     
     const list = listGroups(TEST_CWD);
-    assert.strictEqual(list.length, 2);
+    assert.equal(list.some(g => g.name === 'error-group'), false);
+    assert.ok(list.find(g => g.name === 'test-group'));
+    assert.ok(list.find(g => g.name === 'profile-group'));
   });
 });
