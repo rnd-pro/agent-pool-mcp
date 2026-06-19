@@ -23,6 +23,38 @@ describe('Provider Config Injector', () => {
     assert.deepEqual(envOverrides, { PORTAL_MCP_URL: 'http://portal.local/mcp' });
   });
 
+  it('createProviderRuntimeEnv preserves a writable explicit npm cache', async () => {
+    let { createProviderRuntimeEnv } = await import('../src/runner/provider-config.js');
+    let npmCache = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pool-npm-cache-test-'));
+    tmpDirsToCleanup.push(npmCache);
+
+    let env = createProviderRuntimeEnv({ AGENT_POOL_NPM_CACHE: npmCache });
+
+    assert.equal(env.NPM_CONFIG_CACHE, npmCache);
+    assert.equal(env.npm_config_cache, npmCache);
+    fs.writeFileSync(path.join(env.NPM_CONFIG_CACHE, 'probe'), 'ok');
+  });
+
+  it('createProviderRuntimeEnv replaces non-writable npm cache settings', async () => {
+    let { createProviderRuntimeEnv } = await import('../src/runner/provider-config.js');
+    let blocked = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pool-blocked-npm-cache-'));
+    tmpDirsToCleanup.push(blocked);
+    fs.chmodSync(blocked, 0o555);
+
+    try {
+      let env = createProviderRuntimeEnv({
+        NPM_CONFIG_CACHE: blocked,
+        npm_config_cache: blocked,
+      });
+
+      assert.notEqual(env.NPM_CONFIG_CACHE, blocked);
+      assert.equal(env.npm_config_cache, env.NPM_CONFIG_CACHE);
+      fs.writeFileSync(path.join(env.NPM_CONFIG_CACHE, 'probe'), 'ok');
+    } finally {
+      fs.chmodSync(blocked, 0o755);
+    }
+  });
+
   it('createOpenCodeEnv creates isolated config and returns env overrides', async () => {
     let { createOpenCodeEnv } = await import('../src/runner/provider-config.js');
     

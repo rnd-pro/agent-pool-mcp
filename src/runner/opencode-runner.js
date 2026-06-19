@@ -7,7 +7,7 @@ import { trackChild, killGroup, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
 import { createProcessWatchdog } from './timeout-manager.js';
-import { createOpenCodeEnv, cleanupTmpConfig } from './provider-config.js';
+import { createOpenCodeEnv, cleanupTmpConfig, createProviderRuntimeEnv } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
 
 function normalizeEvent(ev) {
@@ -136,14 +136,14 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
 
     let spawnOpts = {
       cwd: effectiveCwd,
-      env: {
+      env: createProviderRuntimeEnv({
         ...process.env,
         TERM: 'dumb',
         CI: '1',
         AGENT_POOL_DEPTH: String(currentDepth + 1),
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
         ...envOverrides,
-      },
+      }),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     };

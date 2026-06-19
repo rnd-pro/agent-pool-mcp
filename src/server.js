@@ -691,7 +691,11 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     }
   }
 
-  const resourceGroupName = args.resource_group || args.resourceGroup || agentDef?.resourceGroup || null;
+  const hasExplicitRuntimeRoute = Boolean(args.provider || args.model);
+  const resourceGroupName = args.resource_group
+    || args.resourceGroup
+    || (hasExplicitRuntimeRoute ? null : agentDef?.resourceGroup)
+    || null;
   const resourceGroup = resourceGroupName ? getGroup(cwd, resourceGroupName) : null;
   const resourceProfile = resourceGroupName && resourceGroup
     ? getGroupNextProfile(cwd, resourceGroupName, resourceGroup)

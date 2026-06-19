@@ -6,6 +6,7 @@ import { killGroup, trackChild, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
 import { createProcessWatchdog } from './timeout-manager.js';
+import { createProviderRuntimeEnv } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
 
 function normalizeCodexEvent(ev) {
@@ -152,13 +153,13 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
     let currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
     let child = spawn('codex', args, {
       cwd: effectiveCwd,
-      env: {
+      env: createProviderRuntimeEnv({
         ...process.env,
         TERM: 'dumb',
         CI: '1',
         AGENT_POOL_DEPTH: String(currentDepth + 1),
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
-      },
+      }),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     });

@@ -7,9 +7,11 @@ import { resetConfig } from '../src/runner/config.js';
 
 let oldPath;
 let oldArgsFile;
+let oldEnvFile;
 let oldStderr;
 let oldPortalMcpUrl;
 let oldRunnerMode;
+let oldAgentPoolNpmCache;
 let oldCwd;
 let tmpDir;
 
@@ -17,9 +19,11 @@ describe('codex runner', () => {
   beforeEach(() => {
     oldPath = process.env.PATH;
     oldArgsFile = process.env.CODEX_RUNNER_ARGS_FILE;
+    oldEnvFile = process.env.CODEX_RUNNER_ENV_FILE;
     oldStderr = process.env.CODEX_RUNNER_STDERR;
     oldPortalMcpUrl = process.env.PORTAL_MCP_URL;
     oldRunnerMode = process.env.CODEX_RUNNER_MODE;
+    oldAgentPoolNpmCache = process.env.AGENT_POOL_NPM_CACHE;
     oldCwd = process.cwd();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-runner-test-'));
 
@@ -28,6 +32,12 @@ describe('codex runner', () => {
 const fs = require('node:fs');
 if (process.env.CODEX_RUNNER_ARGS_FILE) {
   fs.writeFileSync(process.env.CODEX_RUNNER_ARGS_FILE, JSON.stringify(process.argv.slice(2)));
+}
+if (process.env.CODEX_RUNNER_ENV_FILE) {
+  fs.writeFileSync(process.env.CODEX_RUNNER_ENV_FILE, JSON.stringify({
+    NPM_CONFIG_CACHE: process.env.NPM_CONFIG_CACHE || null,
+    npm_config_cache: process.env.npm_config_cache || null
+  }));
 }
 if (process.env.CODEX_RUNNER_STDERR) {
   process.stderr.write(process.env.CODEX_RUNNER_STDERR);
@@ -60,6 +70,11 @@ if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
     } else {
       process.env.CODEX_RUNNER_ARGS_FILE = oldArgsFile;
     }
+    if (oldEnvFile === undefined) {
+      delete process.env.CODEX_RUNNER_ENV_FILE;
+    } else {
+      process.env.CODEX_RUNNER_ENV_FILE = oldEnvFile;
+    }
     if (oldStderr === undefined) {
       delete process.env.CODEX_RUNNER_STDERR;
     } else {
@@ -74,6 +89,11 @@ if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
       delete process.env.CODEX_RUNNER_MODE;
     } else {
       process.env.CODEX_RUNNER_MODE = oldRunnerMode;
+    }
+    if (oldAgentPoolNpmCache === undefined) {
+      delete process.env.AGENT_POOL_NPM_CACHE;
+    } else {
+      process.env.AGENT_POOL_NPM_CACHE = oldAgentPoolNpmCache;
     }
     process.chdir(oldCwd);
     resetConfig();
@@ -96,6 +116,21 @@ if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
     assert.deepEqual(args.slice(0, 4), ['exec', '--json', '-s', 'danger-full-access']);
     assert.match(args.at(-1), /hello$/);
+  });
+
+  it('passes a writable npm cache to Codex child processes', async () => {
+    let envFile = path.join(tmpDir, 'env.json');
+    let npmCache = path.join(tmpDir, 'npm-cache');
+    process.env.CODEX_RUNNER_ENV_FILE = envFile;
+    process.env.AGENT_POOL_NPM_CACHE = npmCache;
+
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+    await runCodexStreaming({ prompt: 'hello', cwd: tmpDir, timeout: 5 });
+
+    let env = JSON.parse(fs.readFileSync(envFile, 'utf8'));
+    assert.equal(env.NPM_CONFIG_CACHE, npmCache);
+    assert.equal(env.npm_config_cache, npmCache);
+    fs.writeFileSync(path.join(env.NPM_CONFIG_CACHE, 'probe'), 'ok');
   });
 
   it('filters Codex stdin notice out of final errors', async () => {

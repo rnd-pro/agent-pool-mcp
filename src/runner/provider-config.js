@@ -31,6 +31,49 @@ export function createAntigravityEnv(portalUrl) {
   };
 }
 
+function isWritableDirectory(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    let probe = path.join(dir, '.agent-pool-write-test');
+    fs.writeFileSync(probe, '');
+    fs.rmSync(probe, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function defaultNpmCacheDir() {
+  let userPart = typeof process.getuid === 'function'
+    ? `uid-${process.getuid()}`
+    : 'user';
+  return path.join(os.tmpdir(), 'agent-pool-npm-cache', userPart);
+}
+
+/**
+ * @param {object} baseEnv
+ * @returns {object}
+ */
+export function createProviderRuntimeEnv(baseEnv = process.env) {
+  let candidate = baseEnv.AGENT_POOL_NPM_CACHE
+    || baseEnv.NPM_CONFIG_CACHE
+    || baseEnv.npm_config_cache
+    || null;
+  let npmCache = candidate && isWritableDirectory(candidate)
+    ? candidate
+    : defaultNpmCacheDir();
+
+  if (!isWritableDirectory(npmCache)) {
+    return { ...baseEnv };
+  }
+
+  return {
+    ...baseEnv,
+    NPM_CONFIG_CACHE: npmCache,
+    npm_config_cache: npmCache,
+  };
+}
+
 /**
  * Create an isolated OpenCode config with portal URL.
  * Returns env vars to set on the spawn — NO project file pollution.

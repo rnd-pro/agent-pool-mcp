@@ -6,7 +6,12 @@ import { trackChild, untrackChild } from './process-manager.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { loadConfig } from './config.js';
 import { createProcessWatchdog } from './timeout-manager.js';
-import { createClaudeMcpConfig, cleanupTmpConfig, getClaudeGatewayEnv } from './provider-config.js';
+import {
+  createClaudeMcpConfig,
+  cleanupTmpConfig,
+  getClaudeGatewayEnv,
+  createProviderRuntimeEnv,
+} from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
 
 function permissionMode(approvalMode) {
@@ -95,7 +100,7 @@ export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     let child = spawn('claude', args, {
       cwd: cwd ?? process.cwd(),
-      env: {
+      env: createProviderRuntimeEnv({
         ...process.env,
         TERM: 'dumb',
         CI: '1',
@@ -103,7 +108,7 @@ export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, 
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
         ...gatewayEnv,
         ...(effectiveModel ? { ANTHROPIC_SMALL_FAST_MODEL: effectiveModel } : {}),
-      },
+      }),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     });

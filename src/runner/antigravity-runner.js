@@ -7,7 +7,7 @@ import { getRunner, loadConfig } from './config.js';
 import { buildSshSpawn, parseRemotePid } from './ssh.js';
 import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../tools/results.js';
 import { createProcessWatchdog } from './timeout-manager.js';
-import { createAntigravityEnv, cleanupTmpConfig } from './provider-config.js';
+import { createAntigravityEnv, cleanupTmpConfig, createProviderRuntimeEnv } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
 
 const ANTIGRAVITY_BINARY = 'agy';
@@ -157,13 +157,13 @@ export function runAntigravityStreaming({ prompt, cwd, model, approvalMode, time
 
       spawnOpts = {
         cwd: effectiveCwd,
-        env: {
+        env: createProviderRuntimeEnv({
           ...process.env,
           TERM: 'dumb',
           CI: '1',
           AGENT_POOL_DEPTH: String(currentDepth + 1),
           ...envOverrides,
-        },
+        }),
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
       };
