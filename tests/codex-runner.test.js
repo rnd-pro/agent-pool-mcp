@@ -42,7 +42,10 @@ if (process.env.CODEX_RUNNER_ENV_FILE) {
 if (process.env.CODEX_RUNNER_STDERR) {
   process.stderr.write(process.env.CODEX_RUNNER_STDERR);
 }
-if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
+if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.argv[3] === 'resume') {
+  process.stderr.write('Error: thread/resume: thread/resume failed: no rollout found for thread id stale-thread (code -32600)\\n');
+  process.exit(1);
+} else if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
   console.log(JSON.stringify({ type: 'session_meta', payload: {} }));
   console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }));
   setInterval(() => {}, 1000);
@@ -267,6 +270,29 @@ if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
 
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
     assert.deepEqual(args.slice(0, 4), ['exec', 'resume', '--json', 'thread-test']);
+    assert.match(args.at(-1), /continue$/);
+  });
+
+  it('falls back to a fresh Codex thread when resume rollout is missing', async () => {
+    let argsFile = path.join(tmpDir, 'args-missing-rollout.json');
+    process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
+    process.env.CODEX_RUNNER_MODE = 'missing-rollout-on-resume';
+
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+    let result = await runCodexStreaming({
+      prompt: 'continue',
+      cwd: tmpDir,
+      sessionId: 'stale-thread',
+      timeout: 5,
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.sessionId, 'thread-test');
+    assert.equal(result.response, 'Codex response');
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.deepEqual(args.slice(0, 4), ['exec', '--json', '-s', 'danger-full-access']);
+    assert.equal(args.includes('stale-thread'), false);
     assert.match(args.at(-1), /continue$/);
   });
 });

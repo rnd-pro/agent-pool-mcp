@@ -106,7 +106,11 @@ function bootstrapTimeoutMs(config) {
   return seconds * 1000;
 }
 
-export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approvalMode, timeout, sessionId, taskId, chat_id }) {
+function isMissingRolloutError(errors) {
+  return errors.some(error => /thread\/resume failed: no rollout found|no rollout found for thread id/i.test(String(error)));
+}
+
+export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approvalMode, timeout, sessionId, taskId, chat_id, resumeFallbackAttempted = false }) {
   return new Promise((resolve) => {
     let finalPrompt = prompt;
     try {
@@ -343,6 +347,30 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
         exitCode: code,
         totalEvents: events.length,
       };
+
+      if (!resolved && sessionId && !resumeFallbackAttempted && result.exitCode !== 0 && isMissingRolloutError(result.errors)) {
+        resolved = true;
+        if (taskId) {
+          pushTaskEvent(taskId, {
+            type: 'message',
+            role: 'system',
+            content: '[RECOVER] Codex resume session was missing; retrying in a fresh Codex thread.',
+          });
+        }
+        runCodexStreaming({
+          prompt,
+          cwd,
+          model,
+          reasoningEffort,
+          approvalMode,
+          timeout,
+          sessionId: null,
+          taskId,
+          chat_id,
+          resumeFallbackAttempted: true,
+        }).then(resolve);
+        return;
+      }
 
       if (resolved) {
         if (taskId && !bootstrapStalled) updateTaskResult(taskId, result);
