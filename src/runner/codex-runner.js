@@ -77,6 +77,18 @@ function sandboxMode(approvalMode) {
 
 const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
 const CODEX_CHAT_MCP_SERVER = 'agent-portal-chat';
+const CODEX_HEADLESS_APPROVAL_ARGS = ['-a', 'never'];
+const CODEX_CHAT_MCP_APPROVED_TOOLS = [
+  'workflow_board',
+  'get_portal_status',
+  'get_orchestrator_status',
+  'get_development_map',
+  'get_chat_task_result',
+  'get_chat_messages',
+  'list_chats',
+  'block_goal',
+  'complete_goal',
+];
 const CODEX_BOOTSTRAP_IGNORED_EVENT_TYPES = new Set(['session_meta']);
 const CODEX_BOOTSTRAP_IGNORED_PAYLOAD_TYPES = new Set(['task_started']);
 
@@ -126,8 +138,8 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
     }
 
     let args = sessionId
-      ? ['exec', 'resume', '--json']
-      : ['exec', '--json', '-s', sandboxMode(approvalMode)];
+      ? [...CODEX_HEADLESS_APPROVAL_ARGS, 'exec', 'resume', '--json']
+      : [...CODEX_HEADLESS_APPROVAL_ARGS, 'exec', '--json', '-s', sandboxMode(approvalMode)];
 
     let effectiveModel = model && model !== 'default' ? model : null;
     if (effectiveModel) {
@@ -143,6 +155,11 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
     if (portalUrl && chat_id) {
       portalUrl += (portalUrl.includes('?') ? '&' : '?') + 'chatId=' + encodeURIComponent(chat_id);
       args.push('-c', `mcp_servers.${CODEX_CHAT_MCP_SERVER}={url=${tomlString(portalUrl)}}`);
+      args.push('-c', 'tools.network_access=true');
+      args.push('-c', 'sandbox_workspace_write.network_access=true');
+      for (let toolName of CODEX_CHAT_MCP_APPROVED_TOOLS) {
+        args.push('-c', `mcp_servers.${CODEX_CHAT_MCP_SERVER}.tools.${toolName}.approval_mode="approve"`);
+      }
     }
     if (sessionId) {
       args.push(sessionId);

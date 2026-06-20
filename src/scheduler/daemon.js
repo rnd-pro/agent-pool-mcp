@@ -94,6 +94,7 @@ function buildCliArgs(provider, prompt, opts = {}) {
   }
 
   const args = [
+    '-a', 'never',
     'exec',
     '--json',
     '-s', codexSandbox(opts.approvalMode),

@@ -42,7 +42,7 @@ if (process.env.CODEX_RUNNER_ENV_FILE) {
 if (process.env.CODEX_RUNNER_STDERR) {
   process.stderr.write(process.env.CODEX_RUNNER_STDERR);
 }
-if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.argv[3] === 'resume') {
+if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.argv.includes('resume')) {
   process.stderr.write('Error: thread/resume: thread/resume failed: no rollout found for thread id stale-thread (code -32600)\\n');
   process.exit(1);
 } else if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
@@ -117,7 +117,7 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
     assert.deepEqual(result.toolCalls, [{ name: 'shell', args: { command: 'pwd' } }]);
 
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
-    assert.deepEqual(args.slice(0, 4), ['exec', '--json', '-s', 'danger-full-access']);
+    assert.deepEqual(args.slice(0, 6), ['-a', 'never', 'exec', '--json', '-s', 'danger-full-access']);
     assert.match(args.at(-1), /hello$/);
   });
 
@@ -241,6 +241,10 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
       args[configIndex + 1],
       'mcp_servers.agent-portal-chat={url="http://127.0.0.1:52395/mcp?transport=stream&chatId=chat%20123"}',
     );
+    assert.ok(args.includes('tools.network_access=true'));
+    assert.ok(args.includes('sandbox_workspace_write.network_access=true'));
+    assert.ok(args.includes('mcp_servers.agent-portal-chat.tools.workflow_board.approval_mode="approve"'));
+    assert.ok(args.includes('mcp_servers.agent-portal-chat.tools.get_chat_task_result.approval_mode="approve"'));
   });
 
   it('maps approval modes to Codex sandbox modes', async () => {
@@ -259,6 +263,7 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
 
     args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
     assert.equal(args[args.indexOf('-s') + 1], 'workspace-write');
+    assert.deepEqual(args.slice(0, 6), ['-a', 'never', 'exec', '--json', '-s', 'workspace-write']);
   });
 
   it('uses codex exec resume when sessionId is provided', async () => {
@@ -269,7 +274,7 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
     await runCodexStreaming({ prompt: 'continue', cwd: tmpDir, sessionId: 'thread-test', timeout: 5 });
 
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
-    assert.deepEqual(args.slice(0, 4), ['exec', 'resume', '--json', 'thread-test']);
+    assert.deepEqual(args.slice(0, 6), ['-a', 'never', 'exec', 'resume', '--json', 'thread-test']);
     assert.match(args.at(-1), /continue$/);
   });
 
@@ -291,7 +296,7 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
     assert.equal(result.response, 'Codex response');
 
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
-    assert.deepEqual(args.slice(0, 4), ['exec', '--json', '-s', 'danger-full-access']);
+    assert.deepEqual(args.slice(0, 6), ['-a', 'never', 'exec', '--json', '-s', 'danger-full-access']);
     assert.equal(args.includes('stale-thread'), false);
     assert.match(args.at(-1), /continue$/);
   });
