@@ -2,16 +2,15 @@
 //
 // Provider Config Manager — pass portal URL without project file pollution.
 //
-// Some providers support isolated config directories or explicit config files:
-//   - OpenCode: OPENCODE_HOME -> temp dir with config
+// Some providers support explicit config injection:
+//   - OpenCode: OPENCODE_CONFIG -> temp config file
 //   - Claude Code: --mcp-config → temp JSON file with config
 //
-// Pattern: create temp → set env → cleanup temp on exit
+// Pattern: pass process-local config → cleanup temp files when the provider requires files
 
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { resolvePortalUrl } from './url-resolver.js';
 
 /**
  * Build Antigravity CLI env overrides.
@@ -75,20 +74,23 @@ export function createProviderRuntimeEnv(baseEnv = process.env) {
 }
 
 /**
- * Create an isolated OpenCode config with portal URL.
- * Returns env vars to set on the spawn — NO project file pollution.
+ * Create a process-local OpenCode config file with the portal URL.
+ * This preserves the user's OpenCode auth store while adding the portal MCP.
  *
  * @param {string} portalUrl - Portal MCP URL
  * @returns {{ envOverrides: object, tmpDir: string }}
  */
 export function createOpenCodeEnv(portalUrl) {
   let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-hub-'));
-  let configPath = path.join(tmpDir, 'config.json');
-
+  let configPath = path.join(tmpDir, 'opencode.json');
   let config = {
+    $schema: 'https://opencode.ai/config.json',
     mcp: {
-      servers: {
-        'agent-portal': { type: 'sse', url: portalUrl },
+      'agent-portal': {
+        type: 'remote',
+        url: portalUrl,
+        enabled: true,
+        oauth: false,
       },
     },
   };
@@ -98,7 +100,7 @@ export function createOpenCodeEnv(portalUrl) {
   return {
     tmpDir,
     envOverrides: {
-      OPENCODE_HOME: tmpDir,
+      OPENCODE_CONFIG: configPath,
     },
   };
 }
@@ -128,44 +130,29 @@ export function createClaudeMcpConfig(portalUrl) {
   return { configPath, tmpDir };
 }
 
-function toAnthropicBaseUrl(portalUrl) {
-  try {
-    let url = new URL(portalUrl);
-    url.search = '';
-    url.hash = '';
-    url.pathname = '/anthropic';
-    return url.toString().replace(/\/$/, '');
-  } catch {
-    return null;
-  }
-}
-
-function readPortalConfig() {
-  let configPath = process.env.PORTAL_CONFIG_PATH
-    || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
-  if (!fs.existsSync(configPath)) return {};
-  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch { return {}; }
-}
+const CLAUDE_DIRECT_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_CUSTOM_HEADERS',
+  'ANTHROPIC_VERTEX_BASE_URL',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY',
+];
 
 /**
- * Build Claude Code gateway env overrides when portal anthropicGateway is enabled.
- * @param {string|null} portalUrl - Portal MCP URL
+ * @param {object} [baseEnv]
  * @returns {object}
  */
-export function getClaudeGatewayEnv(portalUrl) {
-  let portalConfig = readPortalConfig();
-  let gateway = portalConfig.anthropicGateway || portalConfig.settings?.anthropicGateway || null;
-  if (!gateway?.enabled) return {};
-
-  let resolvedPortalUrl = portalUrl || resolvePortalUrl();
-  let baseUrl = gateway.baseUrl || (resolvedPortalUrl ? toAnthropicBaseUrl(resolvedPortalUrl) : null);
-  if (!baseUrl) return {};
-
-  return {
-    ANTHROPIC_BASE_URL: baseUrl,
-    ANTHROPIC_AUTH_TOKEN: gateway.authToken || process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN || 'portal-local',
-    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
-  };
+export function createClaudeDirectEnv(baseEnv = process.env) {
+  let env = { ...baseEnv };
+  for (let key of CLAUDE_DIRECT_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
 }
 
 /**
@@ -177,36 +164,4 @@ export function cleanupTmpConfig(tmpDir) {
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch { /* non-critical */ }
-}
-
-/** @deprecated Use createOpenCodeEnv instead */
-export function injectOpenCodeConfig(cwd, portalUrl) {
-  let configPath = path.join(cwd, 'opencode.json');
-  let backupPath = configPath + '.bak';
-  let existing = {};
-  if (fs.existsSync(configPath)) {
-    try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
-    if (!existing.__portal_injected__ && !fs.existsSync(backupPath)) {
-      fs.copyFileSync(configPath, backupPath);
-    }
-  }
-  let injected = { ...existing };
-  injected.mcp = { servers: { 'agent-portal': { type: 'sse', url: portalUrl } } };
-  injected.__portal_injected__ = true;
-  fs.writeFileSync(configPath, JSON.stringify(injected, null, 2));
-}
-
-/** @deprecated Use cleanupTmpConfig instead */
-export function cleanupOpenCodeConfig(cwd) {
-  let configPath = path.join(cwd, 'opencode.json');
-  let backupPath = configPath + '.bak';
-  if (fs.existsSync(backupPath)) {
-    fs.copyFileSync(backupPath, configPath);
-    fs.unlinkSync(backupPath);
-  } else if (fs.existsSync(configPath)) {
-    try {
-      let data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      if (data.__portal_injected__) fs.unlinkSync(configPath);
-    } catch {}
-  }
 }

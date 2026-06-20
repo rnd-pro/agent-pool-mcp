@@ -100,7 +100,9 @@ curl -fsSL https://antigravity.google/cli/install.sh | bash
 agy       # First run: opens browser for OAuth
 ```
 
-Claude Code tasks use `provider: "claude"` and require the `claude` CLI to be installed and authenticated.
+Claude Code tasks use `provider: "claude"` and require the `claude` CLI to be installed and authenticated with Claude Code's native auth. Agent Pool removes inherited Anthropic proxy/API env vars before spawning Claude Code so subscription/OAuth auth is not overridden by gateway settings.
+
+OpenCode tasks use `provider: "opencode"`. Install and authenticate OpenCode separately, then connect DeepSeek with `/connect deepseek`. DeepSeek V4 models use OpenCode's native model ids, for example `deepseek/deepseek-v4-pro`.
 
 Add to your IDE's MCP configuration:
 

@@ -55,30 +55,53 @@ describe('Provider Config Injector', () => {
     }
   });
 
-  it('createOpenCodeEnv creates isolated config and returns env overrides', async () => {
+  it('createOpenCodeEnv injects MCP config without isolating OpenCode auth', async () => {
     let { createOpenCodeEnv } = await import('../src/runner/provider-config.js');
     
     let { tmpDir, envOverrides } = createOpenCodeEnv('http://portal.local/mcp');
     tmpDirsToCleanup.push(tmpDir);
 
     assert.ok(tmpDir.includes('opencode-hub-'), 'Should be an opencode-hub temp dir');
-    assert.deepEqual(envOverrides, { OPENCODE_HOME: tmpDir }, 'Should return OPENCODE_HOME env var');
-    
-    let configPath = path.join(tmpDir, 'config.json');
-    assert.ok(fs.existsSync(configPath), 'Should create config.json');
-    
-    let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal('OPENCODE_HOME' in envOverrides, false);
+    assert.equal(typeof envOverrides.OPENCODE_CONFIG, 'string');
+    assert.equal(envOverrides.OPENCODE_CONFIG, path.join(tmpDir, 'opencode.json'));
+
+    let config = JSON.parse(fs.readFileSync(envOverrides.OPENCODE_CONFIG, 'utf8'));
+    assert.equal(config.$schema, 'https://opencode.ai/config.json');
     assert.ok(config.mcp, 'Should have mcp property');
-    assert.ok(config.mcp.servers, 'Should have mcp.servers');
-    assert.ok(config.mcp.servers['agent-portal'], 'Should have agent-portal entry');
-    assert.equal(config.mcp.servers['agent-portal'].url, 'http://portal.local/mcp');
-    assert.equal(config.mcp.servers['agent-portal'].type, 'sse');
+    assert.ok(config.mcp['agent-portal'], 'Should have agent-portal entry');
+    assert.equal(config.mcp['agent-portal'].url, 'http://portal.local/mcp');
+    assert.equal(config.mcp['agent-portal'].type, 'remote');
+    assert.equal(config.mcp['agent-portal'].enabled, true);
+    assert.equal(config.mcp['agent-portal'].oauth, false);
+  });
+
+  it('createClaudeDirectEnv removes proxy and API credentials from inherited env', async () => {
+    let { createClaudeDirectEnv } = await import('../src/runner/provider-config.js');
+
+    let env = createClaudeDirectEnv({
+      ANTHROPIC_BASE_URL: 'http://proxy.local/anthropic',
+      ANTHROPIC_AUTH_TOKEN: 'proxy-token',
+      ANTHROPIC_API_KEY: 'api-key',
+      ANTHROPIC_CUSTOM_HEADERS: 'x-test:1',
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+      CLAUDE_CODE_OAUTH_TOKEN: 'subscription-token',
+      KEEP_ME: 'yes',
+    });
+
+    assert.equal('ANTHROPIC_BASE_URL' in env, false);
+    assert.equal('ANTHROPIC_AUTH_TOKEN' in env, false);
+    assert.equal('ANTHROPIC_API_KEY' in env, false);
+    assert.equal('ANTHROPIC_CUSTOM_HEADERS' in env, false);
+    assert.equal('CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY' in env, false);
+    assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'subscription-token');
+    assert.equal(env.KEEP_ME, 'yes');
   });
 
   it('cleanupTmpConfig removes the temporary directory', async () => {
-    let { createOpenCodeEnv, cleanupTmpConfig } = await import('../src/runner/provider-config.js');
+    let { cleanupTmpConfig } = await import('../src/runner/provider-config.js');
     
-    let { tmpDir } = createOpenCodeEnv('http://portal.local/mcp');
+    let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-hub-'));
     assert.ok(fs.existsSync(tmpDir), 'Temp dir should exist initially');
 
     cleanupTmpConfig(tmpDir);
@@ -95,88 +118,4 @@ describe('Provider Config Injector', () => {
     assert.ok(fs.existsSync(safeDir), 'Safe dir should NOT be removed due to missing "hub-" marker');
   });
 
-  it('getClaudeGatewayEnv returns Anthropic env when gateway is enabled', async () => {
-    let oldConfigPath = process.env.PORTAL_CONFIG_PATH;
-    let oldToken = process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
-    let configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'portal-config-')), 'agent-portal.json');
-    tmpDirsToCleanup.push(path.dirname(configPath));
-
-    process.env.PORTAL_CONFIG_PATH = configPath;
-    process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN = 'env-token';
-    fs.writeFileSync(configPath, JSON.stringify({ anthropicGateway: { enabled: true } }));
-
-    try {
-      let { getClaudeGatewayEnv } = await import('../src/runner/provider-config.js');
-      let env = getClaudeGatewayEnv('http://localhost:1234/mcp');
-
-      assert.equal(env.ANTHROPIC_BASE_URL, 'http://localhost:1234/anthropic');
-      assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'env-token');
-      assert.equal(env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
-    } finally {
-      if (oldConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
-      else process.env.PORTAL_CONFIG_PATH = oldConfigPath;
-      if (oldToken === undefined) delete process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
-      else process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN = oldToken;
-    }
-  });
-
-  it('getClaudeGatewayEnv can use configured gateway baseUrl without portal URL', async () => {
-    let oldConfigPath = process.env.PORTAL_CONFIG_PATH;
-    let oldToken = process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
-    let configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'portal-config-')), 'agent-portal.json');
-    tmpDirsToCleanup.push(path.dirname(configPath));
-
-    process.env.PORTAL_CONFIG_PATH = configPath;
-    delete process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
-    fs.writeFileSync(configPath, JSON.stringify({
-      anthropicGateway: {
-        enabled: true,
-        baseUrl: 'http://127.0.0.1:3456/anthropic',
-        authToken: 'configured-token',
-      },
-    }));
-
-    try {
-      let { getClaudeGatewayEnv } = await import('../src/runner/provider-config.js');
-      let env = getClaudeGatewayEnv(null);
-
-      assert.equal(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:3456/anthropic');
-      assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'configured-token');
-      assert.equal(env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
-    } finally {
-      if (oldConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
-      else process.env.PORTAL_CONFIG_PATH = oldConfigPath;
-      if (oldToken === undefined) delete process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
-      else process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN = oldToken;
-    }
-  });
-
-  it('getClaudeGatewayEnv resolves portal URL when none is passed', async () => {
-    let oldConfigPath = process.env.PORTAL_CONFIG_PATH;
-    let oldPortalMcpUrl = process.env.PORTAL_MCP_URL;
-    let configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'portal-config-')), 'agent-portal.json');
-    tmpDirsToCleanup.push(path.dirname(configPath));
-
-    process.env.PORTAL_CONFIG_PATH = configPath;
-    process.env.PORTAL_MCP_URL = 'http://localhost:7890/mcp';
-    fs.writeFileSync(configPath, JSON.stringify({
-      anthropicGateway: {
-        enabled: true,
-        authToken: 'resolved-token',
-      },
-    }));
-
-    try {
-      let { getClaudeGatewayEnv } = await import('../src/runner/provider-config.js');
-      let env = getClaudeGatewayEnv(null);
-
-      assert.equal(env.ANTHROPIC_BASE_URL, 'http://localhost:7890/anthropic');
-      assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'resolved-token');
-    } finally {
-      if (oldConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
-      else process.env.PORTAL_CONFIG_PATH = oldConfigPath;
-      if (oldPortalMcpUrl === undefined) delete process.env.PORTAL_MCP_URL;
-      else process.env.PORTAL_MCP_URL = oldPortalMcpUrl;
-    }
-  });
 });

@@ -9,6 +9,10 @@ let oldArgsFile;
 let oldEnvFile;
 let oldStderr;
 let oldPortalConfigDir;
+let oldAnthropicBaseUrl;
+let oldAnthropicAuthToken;
+let oldAnthropicApiKey;
+let oldGatewayDiscovery;
 let tmpDir;
 
 describe('claude runner', () => {
@@ -18,6 +22,10 @@ describe('claude runner', () => {
     oldEnvFile = process.env.CLAUDE_RUNNER_ENV_FILE;
     oldStderr = process.env.CLAUDE_RUNNER_STDERR;
     oldPortalConfigDir = process.env.PORTAL_CONFIG_DIR;
+    oldAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
+    oldAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    oldAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    oldGatewayDiscovery = process.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY;
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-runner-test-'));
     process.env.PORTAL_CONFIG_DIR = tmpDir;
 
@@ -29,7 +37,11 @@ if (process.env.CLAUDE_RUNNER_ARGS_FILE) {
 }
 if (process.env.CLAUDE_RUNNER_ENV_FILE) {
   fs.writeFileSync(process.env.CLAUDE_RUNNER_ENV_FILE, JSON.stringify({
-    ANTHROPIC_SMALL_FAST_MODEL: process.env.ANTHROPIC_SMALL_FAST_MODEL || null
+    ANTHROPIC_SMALL_FAST_MODEL: process.env.ANTHROPIC_SMALL_FAST_MODEL || null,
+    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || null,
+    ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN || null,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || null,
+    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: process.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY || null
   }));
 }
 if (process.env.CLAUDE_RUNNER_STDERR) {
@@ -71,6 +83,26 @@ for (const event of events) console.log(JSON.stringify(event));
       delete process.env.PORTAL_CONFIG_DIR;
     } else {
       process.env.PORTAL_CONFIG_DIR = oldPortalConfigDir;
+    }
+    if (oldAnthropicBaseUrl === undefined) {
+      delete process.env.ANTHROPIC_BASE_URL;
+    } else {
+      process.env.ANTHROPIC_BASE_URL = oldAnthropicBaseUrl;
+    }
+    if (oldAnthropicAuthToken === undefined) {
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+    } else {
+      process.env.ANTHROPIC_AUTH_TOKEN = oldAnthropicAuthToken;
+    }
+    if (oldAnthropicApiKey === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      process.env.ANTHROPIC_API_KEY = oldAnthropicApiKey;
+    }
+    if (oldGatewayDiscovery === undefined) {
+      delete process.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY;
+    } else {
+      process.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = oldGatewayDiscovery;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -124,11 +156,40 @@ for (const event of events) console.log(JSON.stringify(event));
     process.env.CLAUDE_RUNNER_ENV_FILE = envFile;
 
     let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
-    await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, model: 'deepseek/deepseek-v4-pro', timeout: 5 });
+    await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, model: 'claude-sonnet-4-6', timeout: 5 });
 
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
     let env = JSON.parse(fs.readFileSync(envFile, 'utf8'));
-    assert.equal(args[args.indexOf('--model') + 1], 'deepseek/deepseek-v4-pro');
-    assert.equal(env.ANTHROPIC_SMALL_FAST_MODEL, 'deepseek/deepseek-v4-pro');
+    assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-4-6');
+    assert.equal(env.ANTHROPIC_SMALL_FAST_MODEL, 'claude-sonnet-4-6');
+  });
+
+  it('passes Claude reasoning effort to Claude Code', async () => {
+    let argsFile = path.join(tmpDir, 'args-effort.json');
+    process.env.CLAUDE_RUNNER_ARGS_FILE = argsFile;
+
+    let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
+    await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, reasoningEffort: 'max', timeout: 5 });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.equal(args[args.indexOf('--effort') + 1], 'max');
+  });
+
+  it('does not inherit Anthropic proxy or API env into direct Claude runs', async () => {
+    let envFile = path.join(tmpDir, 'env-direct.json');
+    process.env.CLAUDE_RUNNER_ENV_FILE = envFile;
+    process.env.ANTHROPIC_BASE_URL = 'http://proxy.local/anthropic';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'proxy-token';
+    process.env.ANTHROPIC_API_KEY = 'api-key';
+    process.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = '1';
+
+    let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
+    await runClaudeStreaming({ prompt: 'hello', cwd: tmpDir, timeout: 5 });
+
+    let env = JSON.parse(fs.readFileSync(envFile, 'utf8'));
+    assert.equal(env.ANTHROPIC_BASE_URL, null);
+    assert.equal(env.ANTHROPIC_AUTH_TOKEN, null);
+    assert.equal(env.ANTHROPIC_API_KEY, null);
+    assert.equal(env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, null);
   });
 });

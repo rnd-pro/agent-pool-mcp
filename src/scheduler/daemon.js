@@ -20,7 +20,7 @@ import { getRunner } from '../runner/config.js';
 import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
 import { consumeSignals, deleteSignals } from './run-signals.js';
-import { getClaudeGatewayEnv } from '../runner/provider-config.js';
+import { createClaudeDirectEnv } from '../runner/provider-config.js';
 import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
 
 const ACTIVE_POLL_INTERVAL_MS = 3_000;
@@ -62,16 +62,23 @@ function claudePermissionMode(approvalMode) {
   return 'bypassPermissions';
 }
 
-function providerGatewayEnv(provider) {
-  return provider === 'claude' ? getClaudeGatewayEnv(null) : {};
+function createProviderEnv(provider, env) {
+  return provider === 'claude' ? createClaudeDirectEnv(env) : env;
 }
 
 const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const CLAUDE_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 function normalizeCodexReasoningEffort(value) {
   let normalized = typeof value === 'string' ? value.trim() : '';
   if (!normalized || normalized === 'default') return null;
   return CODEX_REASONING_EFFORTS.has(normalized) ? normalized : null;
+}
+
+function normalizeClaudeReasoningEffort(value) {
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized === 'default') return null;
+  return CLAUDE_REASONING_EFFORTS.has(normalized) ? normalized : null;
 }
 
 function buildCliArgs(provider, prompt, opts = {}) {
@@ -90,6 +97,8 @@ function buildCliArgs(provider, prompt, opts = {}) {
       '--permission-mode', claudePermissionMode(opts.approvalMode),
     ];
     if (model) args.push('--model', model);
+    const reasoningEffort = normalizeClaudeReasoningEffort(opts.reasoningEffort);
+    if (reasoningEffort) args.push('--effort', reasoningEffort);
     return args;
   }
 
@@ -234,7 +243,7 @@ function executeSchedule(schedule) {
 
   const child = spawn(provider, args, {
     cwd: schedule.cwd || cwd,
-    env: { ...process.env, TERM: 'dumb', CI: '1', ...providerGatewayEnv(provider) },
+    env: createProviderEnv(provider, { ...process.env, TERM: 'dumb', CI: '1' }),
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: true,
   });
@@ -503,13 +512,12 @@ function spawnStep(stepDef, run, runId, bounceReason) {
       const currentDepth = parseInt(process.env.AGENT_POOL_DEPTH ?? '0');
       spawnOpts = {
         cwd: run.cwd || cwd,
-        env: {
+        env: createProviderEnv(provider, {
           ...process.env,
           TERM: 'dumb',
           CI: '1',
           AGENT_POOL_DEPTH: String(currentDepth + 1),
-          ...providerGatewayEnv(provider),
-        },
+        }),
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
       };

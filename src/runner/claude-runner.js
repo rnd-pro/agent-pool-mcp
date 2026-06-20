@@ -9,7 +9,7 @@ import { createProcessWatchdog } from './timeout-manager.js';
 import {
   createClaudeMcpConfig,
   cleanupTmpConfig,
-  getClaudeGatewayEnv,
+  createClaudeDirectEnv,
   createProviderRuntimeEnv,
 } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
@@ -18,6 +18,14 @@ function permissionMode(approvalMode) {
   if (approvalMode === 'plan') return 'plan';
   if (approvalMode === 'auto_edit') return 'acceptEdits';
   return 'bypassPermissions';
+}
+
+const CLAUDE_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+function normalizeClaudeReasoningEffort(value) {
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized === 'default') return null;
+  return CLAUDE_REASONING_EFFORTS.has(normalized) ? normalized : null;
 }
 
 function normalizeClaudeEvent(ev) {
@@ -56,7 +64,18 @@ function normalizeClaudeEvent(ev) {
   return null;
 }
 
-export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, includeDirs, chat_id }) {
+export function runClaudeStreaming({
+  prompt,
+  cwd,
+  model,
+  reasoningEffort,
+  approvalMode,
+  timeout,
+  sessionId,
+  taskId,
+  includeDirs,
+  chat_id,
+}) {
   return new Promise((resolve) => {
     let finalPrompt = prompt;
     try {
@@ -75,6 +94,8 @@ export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     let effectiveModel = model && model !== 'default' ? model : null;
     if (effectiveModel) args.push('--model', effectiveModel);
+    let effectiveReasoningEffort = normalizeClaudeReasoningEffort(reasoningEffort);
+    if (effectiveReasoningEffort) args.push('--effort', effectiveReasoningEffort);
     if (sessionId) args.push('--resume', sessionId);
     if (includeDirs?.length > 0) {
       for (let dir of includeDirs) args.push('--add-dir', dir);
@@ -86,7 +107,6 @@ export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, 
     }
 
     let hubTmpDir = null;
-    let gatewayEnv = getClaudeGatewayEnv(portalUrl);
     if (portalUrl) {
       let hub = createClaudeMcpConfig(portalUrl);
       hubTmpDir = hub.tmpDir;
@@ -100,15 +120,14 @@ export function runClaudeStreaming({ prompt, cwd, model, approvalMode, timeout, 
 
     let child = spawn('claude', args, {
       cwd: cwd ?? process.cwd(),
-      env: createProviderRuntimeEnv({
+      env: createProviderRuntimeEnv(createClaudeDirectEnv({
         ...process.env,
         TERM: 'dumb',
         CI: '1',
         AGENT_POOL_DEPTH: String(currentDepth + 1),
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
-        ...gatewayEnv,
         ...(effectiveModel ? { ANTHROPIC_SMALL_FAST_MODEL: effectiveModel } : {}),
-      }),
+      })),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     });

@@ -91,7 +91,7 @@ describe('task results', () => {
   it('retains completed task reports across multiple get_task_result calls', () => {
     fs.mkdirSync(TEST_CWD, { recursive: true });
     createTask('retained-result-task', 'audit prompt', null, 'plan', TEST_CWD, 'reviewer', 'parent-chat', 'chat-1', null, null, 'review', {
-      provider: 'claude',
+      provider: 'opencode',
       model: 'deepseek/deepseek-v4-pro',
       sessionId: 'session-1',
     });
@@ -108,7 +108,7 @@ describe('task results', () => {
 
     assert.match(first.content[0].text, /Full audit report body/);
     assert.match(second.content[0].text, /Full audit report body/);
-    assert.match(second.content[0].text, /Provider: claude/);
+    assert.match(second.content[0].text, /Provider: opencode/);
     assert.ok(second.content[0].text.includes('Model: deepseek/deepseek-v4-pro'));
     assert.equal(task.chatId, 'chat-1');
     assert.equal(task.resourceGroup, 'review');
@@ -118,7 +118,7 @@ describe('task results', () => {
   it('updates soft-timeout tasks with final results and refreshes metadata', () => {
     fs.mkdirSync(TEST_CWD, { recursive: true });
     createTask('soft-timeout-task', 'slow prompt', null, 'plan', TEST_CWD, 'reviewer', null, 'chat-2', null, null, 'review', {
-      provider: 'claude',
+      provider: 'opencode',
       model: 'deepseek/deepseek-v4-pro',
     });
     completeTask('soft-timeout-task', {
@@ -231,8 +231,11 @@ describe('task results', () => {
     assert.equal(result.systemLoad.capacity.runningTaskCount >= 1, true);
     assert.equal(typeof result.systemLoad.cpu.count, 'number');
     assert.equal(typeof result.systemLoad.memory.totalBytes, 'number');
+    assert.equal(typeof result.systemLoad.memory.availableBytes, 'number');
+    assert.equal(typeof result.systemLoad.memory.estimatedNewTaskBytes, 'number');
     assert.equal(typeof result.systemLoad.capacity.state, 'string');
     assert.equal(typeof result.systemLoad.capacity.recommendedMaxParallelTasks, 'number');
+    assert.equal(typeof result.systemLoad.capacity.estimatedAdditionalTaskSlots, 'number');
     assert.equal('liveEvents' in result.systemLoad, false);
     assert.equal('stderr' in result.systemLoad, false);
   });

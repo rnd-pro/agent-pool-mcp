@@ -343,13 +343,17 @@ function resultFailureReason(result) {
   return 'provider attempt failed';
 }
 
-const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const PROVIDER_REASONING_EFFORTS = {
+  codex: new Set(['low', 'medium', 'high', 'xhigh']),
+  claude: new Set(['low', 'medium', 'high', 'xhigh', 'max']),
+};
 const APPROVAL_MODES = new Set(['yolo', 'auto_edit', 'plan']);
 
-function normalizeReasoningEffort(value) {
+function normalizeReasoningEffort(value, provider = 'codex') {
   let normalized = typeof value === 'string' ? value.trim() : '';
   if (!normalized || normalized === 'default') return null;
-  return CODEX_REASONING_EFFORTS.has(normalized) ? normalized : null;
+  let supported = PROVIDER_REASONING_EFFORTS[provider] || null;
+  return supported?.has(normalized) ? normalized : null;
 }
 
 function normalizeApprovalMode(value) {
@@ -375,15 +379,14 @@ function profileOption(profile, camelName, snakeName) {
 
 function resolveRunProfile(profile, resourceGroup, agentDef) {
   let provider = profile?.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
-  let reasoningEffort = provider === 'codex'
-    ? normalizeReasoningEffort(
-      profileOption(profile, 'reasoningEffort', 'reasoning_effort')
-      ?? resourceGroup?.reasoningEffort
-      ?? resourceGroup?.reasoning_effort
-      ?? agentDef?.reasoningEffort
-      ?? agentDef?.reasoning_effort
-    )
-    : null;
+  let reasoningEffort = normalizeReasoningEffort(
+    profileOption(profile, 'reasoningEffort', 'reasoning_effort')
+    ?? resourceGroup?.reasoningEffort
+    ?? resourceGroup?.reasoning_effort
+    ?? agentDef?.reasoningEffort
+    ?? agentDef?.reasoning_effort,
+    provider
+  );
   return {
     provider,
     model: profile?.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0] ?? null,
@@ -813,11 +816,20 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     prompt,
   });
 
+  // Route to the correct runner based on provider
+  const provider = args.provider || resourceProfile.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
+
   const taskOpts = {
     prompt,
     cwd,
     model: args.model ?? resourceProfile.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0],
-    reasoningEffort: normalizeReasoningEffort(args.reasoningEffort ?? args.reasoning_effort ?? resourceProfile.profile?.reasoningEffort ?? resourceProfile.profile?.reasoning_effort),
+    reasoningEffort: normalizeReasoningEffort(
+      args.reasoningEffort
+      ?? args.reasoning_effort
+      ?? resourceProfile.profile?.reasoningEffort
+      ?? resourceProfile.profile?.reasoning_effort,
+      provider
+    ),
     approvalMode: resolvedMode,
     timeout,
     sessionId: args.session_id,
@@ -830,8 +842,6 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     chat_id: args.chat_id,
   };
 
-  // Route to the correct runner based on provider
-  const provider = args.provider || resourceProfile.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
   const runtimeProfiles = buildRuntimeFallbackProfiles(args, resourceGroup, resourceProfile);
   const hasRuntimeFallback = runtimeProfiles.length > 1;
   let providerError = providerRequirementError(provider);

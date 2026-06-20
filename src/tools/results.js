@@ -518,7 +518,7 @@ export function listAllTasks() {
 export function listTaskState() {
   const taskList = buildTaskList();
   const runningTaskCount = taskList.tasks.filter((task) => task.status === 'running').length;
-  const systemLoad = getSystemLoad();
+  const systemLoad = getSystemLoad({ runningTaskCount });
   return {
     ...taskList,
     systemLoad: {
