@@ -12,11 +12,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
+// Header carrying the per-task secret on the spawned agent's MCP HTTP requests.
+// The portal resolves it to a server-verified slug; a body-supplied agent_slug is
+// never trusted as identity. Must match the portal handler that reads it.
+const TASK_SECRET_HEADER = 'X-Agent-Portal-Task-Secret';
+
 /**
  * Build Antigravity CLI env overrides.
  * Antigravity's documented MCP config locations are global/workspace files, not
  * an isolated env-var home, so the runner passes the resolved portal URL without
- * writing workspace files.
+ * writing workspace files. Antigravity carries only a URL env var and no MCP
+ * config file, so it cannot send the per-task secret header — its connections
+ * resolve to the anonymous read-only principal at the portal.
  *
  * @param {string} portalUrl - Portal MCP URL (e.g. "http://portal.local/mcp")
  * @returns {{ envOverrides: object, tmpDir: null }}
@@ -76,11 +83,15 @@ export function createProviderRuntimeEnv(baseEnv = process.env) {
 /**
  * Create a process-local OpenCode config file with the portal URL.
  * This preserves the user's OpenCode auth store while adding the portal MCP.
+ * When a per-task secret is supplied it is attached as a request header so the
+ * portal can verify the agent's identity; absent it, no headers are written and
+ * the connection resolves to the anonymous read-only principal.
  *
  * @param {string} portalUrl - Portal MCP URL
+ * @param {string} [taskSecret] - Per-task secret for verified identity
  * @returns {{ envOverrides: object, tmpDir: string }}
  */
-export function createOpenCodeEnv(portalUrl) {
+export function createOpenCodeEnv(portalUrl, taskSecret) {
   let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-hub-'));
   let configPath = path.join(tmpDir, 'opencode.json');
   let config = {
@@ -91,6 +102,7 @@ export function createOpenCodeEnv(portalUrl) {
         url: portalUrl,
         enabled: true,
         oauth: false,
+        ...(taskSecret ? { headers: { [TASK_SECRET_HEADER]: taskSecret } } : {}),
       },
     },
   };
@@ -108,11 +120,15 @@ export function createOpenCodeEnv(portalUrl) {
 /**
  * Create an isolated Claude Code MCP config with portal URL.
  * Claude Code loads explicit config files with --mcp-config.
+ * When a per-task secret is supplied it is attached as a request header so the
+ * portal can verify the agent's identity; absent it, no headers are written and
+ * the connection resolves to the anonymous read-only principal.
  *
  * @param {string} portalUrl - Portal MCP URL
+ * @param {string} [taskSecret] - Per-task secret for verified identity
  * @returns {{ configPath: string, tmpDir: string }}
  */
-export function createClaudeMcpConfig(portalUrl) {
+export function createClaudeMcpConfig(portalUrl, taskSecret) {
   let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-hub-'));
   let configPath = path.join(tmpDir, 'mcp.json');
 
@@ -121,6 +137,7 @@ export function createClaudeMcpConfig(portalUrl) {
       'agent-portal': {
         type: 'http',
         url: portalUrl,
+        ...(taskSecret ? { headers: { [TASK_SECRET_HEADER]: taskSecret } } : {}),
       },
     },
   };

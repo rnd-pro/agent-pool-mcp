@@ -76,6 +76,52 @@ describe('Provider Config Injector', () => {
     assert.equal(config.mcp['agent-portal'].oauth, false);
   });
 
+  it('createOpenCodeEnv embeds the task-secret header when a secret is supplied', async () => {
+    let { createOpenCodeEnv } = await import('../src/runner/provider-config.js');
+
+    let { tmpDir, envOverrides } = createOpenCodeEnv('http://portal.local/mcp', 'secret-abc');
+    tmpDirsToCleanup.push(tmpDir);
+
+    let config = JSON.parse(fs.readFileSync(envOverrides.OPENCODE_CONFIG, 'utf8'));
+    assert.deepEqual(config.mcp['agent-portal'].headers, {
+      'X-Agent-Portal-Task-Secret': 'secret-abc',
+    });
+  });
+
+  it('createOpenCodeEnv omits the headers key when no secret is supplied', async () => {
+    let { createOpenCodeEnv } = await import('../src/runner/provider-config.js');
+
+    let { tmpDir, envOverrides } = createOpenCodeEnv('http://portal.local/mcp');
+    tmpDirsToCleanup.push(tmpDir);
+
+    let config = JSON.parse(fs.readFileSync(envOverrides.OPENCODE_CONFIG, 'utf8'));
+    assert.equal('headers' in config.mcp['agent-portal'], false);
+  });
+
+  it('createClaudeMcpConfig embeds the task-secret header when a secret is supplied', async () => {
+    let { createClaudeMcpConfig } = await import('../src/runner/provider-config.js');
+
+    let { tmpDir, configPath } = createClaudeMcpConfig('http://portal.local/mcp', 'secret-xyz');
+    tmpDirsToCleanup.push(tmpDir);
+
+    let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal(config.mcpServers['agent-portal'].url, 'http://portal.local/mcp');
+    assert.equal(config.mcpServers['agent-portal'].type, 'http');
+    assert.deepEqual(config.mcpServers['agent-portal'].headers, {
+      'X-Agent-Portal-Task-Secret': 'secret-xyz',
+    });
+  });
+
+  it('createClaudeMcpConfig omits the headers key when no secret is supplied', async () => {
+    let { createClaudeMcpConfig } = await import('../src/runner/provider-config.js');
+
+    let { tmpDir, configPath } = createClaudeMcpConfig('http://portal.local/mcp');
+    tmpDirsToCleanup.push(tmpDir);
+
+    let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal('headers' in config.mcpServers['agent-portal'], false);
+  });
+
   it('createClaudeDirectEnv removes proxy and API credentials from inherited env', async () => {
     let { createClaudeDirectEnv } = await import('../src/runner/provider-config.js');
 

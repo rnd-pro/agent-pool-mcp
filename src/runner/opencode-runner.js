@@ -128,7 +128,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     let envOverrides = {};
     let hubTmpDir = null;
     if (portalUrl) {
-      let hub = createOpenCodeEnv(portalUrl);
+      let hub = createOpenCodeEnv(portalUrl, taskSecret);
       hubTmpDir = hub.tmpDir;
       envOverrides = hub.envOverrides;
     }

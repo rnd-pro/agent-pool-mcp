@@ -110,7 +110,7 @@ export function runClaudeStreaming({
 
     let hubTmpDir = null;
     if (portalUrl) {
-      let hub = createClaudeMcpConfig(portalUrl);
+      let hub = createClaudeMcpConfig(portalUrl, taskSecret);
       hubTmpDir = hub.tmpDir;
       args.push('--mcp-config', hub.configPath);
     }

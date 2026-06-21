@@ -151,6 +151,9 @@ export function runAntigravityStreaming({ prompt, cwd, model, approvalMode, time
       }
       let envOverrides = {};
       if (portalUrl) {
+        // Antigravity carries only a URL env var (no MCP config file), so it
+        // cannot attach the per-task secret header; its connections resolve to
+        // the anonymous read-only principal at the portal.
         let hub = createAntigravityEnv(portalUrl);
         hubTmpDir = hub.tmpDir;
         envOverrides = hub.envOverrides;
