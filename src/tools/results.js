@@ -13,9 +13,28 @@ import {
   listChildrenForTask,
 } from '../runner/process-manager.js';
 import { getBoardStore } from './board-store.js';
+import { getSlotLedger } from '../runner/slot-ledger.js';
 
 /** @type {Map<string, {cwd: string, status: string, prompt: string, approvalMode: string, result: object|null, error: string|null, startedAt: number, completedAt: number|null, pollCount: number, waitHint: string|null, pid: number|null, liveEvents: object[], lastEventAt: number|null}>} */
 const taskStore = new Map();
+
+// ── Capacity ledger lifecycle (best-effort; the dead-pid sweep is the safety net) ──
+
+// Upgrade a reserved slot to running and record the task's liveness pid.
+function _ledgerRedeem(entry, taskId, pid) {
+  if (!entry || !entry.admissionId) return;
+  try {
+    getSlotLedger().redeem({ admissionId: entry.admissionId, taskId, pid }).catch(() => {});
+  } catch { /* ledger unavailable — sweep will reclaim by liveness */ }
+}
+
+// Release a slot on task terminal (idempotent).
+function _ledgerRelease(entry) {
+  if (!entry || !entry.admissionId) return;
+  try {
+    getSlotLedger().release({ admissionId: entry.admissionId }).catch(() => {});
+  } catch { /* ledger unavailable — sweep will reclaim by liveness */ }
+}
 
 /** Max number of live events to keep per task (ring buffer) */
 const MAX_LIVE_EVENTS = 200;
@@ -150,6 +169,7 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     chatId: chatId ?? null,
     agentSlug: agentSlug ?? 'unknown',
     resourceGroup: resourceGroup ?? null,
+    admissionId: metadata.admissionId ?? null,
     provider: metadata.provider ?? null,
     model: metadata.model ?? null,
     runner: metadata.runner ?? null,
@@ -234,6 +254,7 @@ export function setTaskPid(taskId, pid) {
   const entry = taskStore.get(taskId);
   if (entry) {
     entry.pid = pid;
+    _ledgerRedeem(entry, taskId, pid);
     getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'running', startedAt: new Date().toISOString() });
     if (_notifyCallback) _notifyCallback(taskId, 'pid', { pid, meta: getTaskMeta(taskId) });
   }
@@ -252,8 +273,9 @@ export function completeTask(taskId, result) {
     entry.result = result;
     entry.completedAt = Date.now();
     entry.pid = null;
+    _ledgerRelease(entry);
     if (result?.sessionId) entry.sessionId = result.sessionId;
-    
+
     const cost = result?.stats?.cost;
     const tokens = result?.stats?.tokens?.total || result?.stats?.total_tokens;
     getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'done', completedAt: new Date().toISOString(), cost, tokens });
@@ -303,7 +325,8 @@ export function failTask(taskId, errorMessage) {
     entry.error = errorMessage;
     entry.completedAt = Date.now();
     entry.pid = null;
-    
+    _ledgerRelease(entry);
+
     getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'error', completedAt: new Date().toISOString() });
 
     if (_notifyCallback) _notifyCallback(taskId, 'error', { error: errorMessage, meta: getTaskMeta(taskId) });
@@ -346,7 +369,8 @@ export function cancelTask(taskId) {
   entry.status = 'cancelled';
   entry.completedAt = Date.now();
   entry.pid = null;
-  
+  _ledgerRelease(entry);
+
   getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'cancelled', completedAt: new Date().toISOString() });
 
   if (_notifyCallback) _notifyCallback(taskId, 'cancelled', { meta: getTaskMeta(taskId) });

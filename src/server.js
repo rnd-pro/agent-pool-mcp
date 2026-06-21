@@ -22,6 +22,7 @@ import { runClaudeStreaming } from './runner/claude-runner.js';
 import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
+import { getSlotLedger } from './runner/slot-ledger.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, listTaskState, cancelTask, finishTask, setNotifyCallback, pushTaskEvent } from './tools/results.js';
 import { listSkills, getSkillContent, createSkill, deleteSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
@@ -632,7 +633,7 @@ function handleUntrackFiles(args) {
  * @param {string} defaults.label - Status label
  * @returns {{content: Array<{type: string, text: string}>}}
  */
-function handleDelegate(args = {}, { approvalMode, emoji, label }) {
+async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   const config = loadConfig();
   const taskId = randomUUID();
   const scope = resolveWorkspaceDirs(config, args.cwd ?? defaultCwd, args.include_dirs);
@@ -714,9 +715,26 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     };
   }
 
+  // Capacity: the slot ledger is the single authority. Reserve a slot under the
+  // cross-process lock BEFORE spawning (admission); a board-minted admission_id
+  // makes this idempotent and lets the board dedup/echo across a crash.
+  let ledgerAdmissionId = null;
   if (resourceGroup?.max_agents) {
-    let groupActiveCount = getGroupActiveCount(resourceGroupName);
-    if (groupActiveCount >= resourceGroup.max_agents) {
+    let admissionId = args.admission_id || taskId;
+    let acq;
+    try {
+      acq = await getSlotLedger().acquire({
+        admissionId,
+        groupKey: resourceGroupName,
+        limit: resourceGroup.max_agents,
+      });
+    } catch (err) {
+      // Lock contention is transient — surface as at-capacity so the caller
+      // retries rather than failing hard.
+      acq = { granted: false, reason: err?.code === 'LEDGER_LOCK_TIMEOUT' ? 'ledger_busy' : 'ledger_error' };
+    }
+    if (!acq.granted) {
+      let groupActiveCount = getGroupActiveCount(resourceGroupName);
       let summary = buildAvailableGroupsSummary(cwd, {
         excludeName: resourceGroupName,
         requestedCount: 1,
@@ -732,6 +750,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
         isError: true,
       };
     }
+    ledgerAdmissionId = admissionId;
   }
 
   // Direct skill activation when no agent_slug is provided.
@@ -898,6 +917,7 @@ function handleDelegate(args = {}, { approvalMode, emoji, label }) {
       contextMode,
       files: fileHints,
       sessionId: args.session_id ?? null,
+      admissionId: ledgerAdmissionId,
     }
   );
 
@@ -1469,9 +1489,13 @@ function groupHasCapacity(group, requestedCount) {
  * @returns {number}
  */
 function getGroupActiveCount(name) {
-  return listAllTasks()
-    .filter((task) => task.status === 'running' && task.resourceGroup === name)
-    .length;
+  // Single capacity authority: a best-effort lock-free read of the slot ledger
+  // (the authoritative gate is `acquire` under the lock in handleDelegate).
+  try {
+    return getSlotLedger().activeCountSync(name);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -1610,7 +1634,7 @@ function handleDeleteGroup(args) {
  * @param {object} args
  * @returns {object}
  */
-function handleDelegateToGroup(args) {
+async function handleDelegateToGroup(args) {
   const cwd = args.cwd ?? defaultCwd;
   const group = getGroup(cwd, args.group);
 
@@ -1672,7 +1696,7 @@ function handleDelegateToGroup(args) {
       resource_group: args.group,
     };
 
-    const result = handleDelegate(delegateArgs, {
+    const result = await handleDelegate(delegateArgs, {
       approvalMode: loadConfig().safety.defaultApprovalMode,
       emoji: '👥',
       label: `Group task (${args.group} #${i + 1})`,

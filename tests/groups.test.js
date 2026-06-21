@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { getSlotLedger } from '../src/runner/slot-ledger.js';
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-groups-test-${Date.now()}`);
 const TEST_HOME = path.join(TEST_CWD, 'portal-home');
@@ -209,10 +210,9 @@ describe('groups.js', () => {
       ],
     });
 
-    createTask('running-saturated-primary', 'primary', null, 'plan', TEST_CWD,
-      'test', null, null, null, null, 'saturated-primary');
-    createTask('running-saturated-secondary', 'secondary', null, 'plan', TEST_CWD,
-      'test', null, null, null, null, 'saturated-secondary');
+    // Saturate via the slot ledger — the single capacity authority.
+    await getSlotLedger().acquire({ admissionId: 'sat-primary', groupKey: 'saturated-primary', limit: 1 });
+    await getSlotLedger().acquire({ admissionId: 'sat-secondary', groupKey: 'saturated-secondary', limit: 1 });
 
     try {
       let response = await callTool('delegate_task', {
@@ -234,8 +234,8 @@ describe('groups.js', () => {
       assert.match(text, /capacity: 0\/2/);
       assert.doesNotMatch(text, /`saturated-secondary`/);
     } finally {
-      completeTask('running-saturated-primary', { exitCode: 0, response: '' });
-      completeTask('running-saturated-secondary', { exitCode: 0, response: '' });
+      await getSlotLedger().release({ admissionId: 'sat-primary' });
+      await getSlotLedger().release({ admissionId: 'sat-secondary' });
     }
   });
 

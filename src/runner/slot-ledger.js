@@ -376,8 +376,55 @@ export class SlotLedger {
     try { fs.unlinkSync(this._lockPath); } catch { /* already released/broken */ }
   }
 
+  /**
+   * Best-effort, lock-free live count for a group (running pid alive, or
+   * reservation within TTL). For display and pre-checks only — the
+   * authoritative gate is `acquire` under the lock.
+   *
+   * @param {string} groupKey
+   * @returns {number}
+   */
+  activeCountSync(groupKey) {
+    let ledger = this._readLedger();
+    let now = this._now();
+    let n = 0;
+    for (let slot of Object.values(ledger.slots)) {
+      if ((slot.groupKey || null) !== (groupKey || null)) continue;
+      let live = slot.status === 'running'
+        ? this._isAlive(slot.pid, slot.host)
+        : (now - slot.reservedAt) <= this._reservationTtlMs;
+      if (live) n++;
+    }
+    return n;
+  }
+
   _sleep(ms) {
     // Not unref'd: the spin-wait must keep the event loop alive until the retry.
     return new Promise((resolve) => { setTimeout(resolve, ms); });
   }
+}
+
+// ── Singleton (the one ledger shared by the server, the daemon, and tasks) ──
+
+const DEFAULT_LEDGER_DIR = path.join(os.homedir(), '.agent-portal', 'agent-pool-ledger');
+let _singleton = null;
+
+/**
+ * Get the process-wide SlotLedger bound to a stable directory shared across the
+ * agent-pool server and the detached daemon (env `AGENT_POOL_LEDGER_DIR`).
+ *
+ * @param {object} [opts]
+ * @returns {SlotLedger}
+ */
+export function getSlotLedger(opts = {}) {
+  if (!_singleton) {
+    let dir = opts.dir || process.env.AGENT_POOL_LEDGER_DIR || DEFAULT_LEDGER_DIR;
+    _singleton = new SlotLedger({ ...opts, dir });
+  }
+  return _singleton;
+}
+
+/** Reset the singleton (tests only). */
+export function _resetSlotLedger() {
+  _singleton = null;
 }

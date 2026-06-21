@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "start": "node index.js",
-    "test": "node --test --test-concurrency=1 tests/*.test.js"
+    "test": "node --import ./tests/_ledger-setup.js --test --test-concurrency=1 tests/*.test.js"
   },
   "keywords": [
     "mcp",
