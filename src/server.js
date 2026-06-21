@@ -23,6 +23,7 @@ import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
 import { getSlotLedger } from './runner/slot-ledger.js';
+import { getTaskSecretStore } from './runner/task-secret-store.js';
 import { createTask, completeTask, failTask, formatTaskResult, getActiveTasks, listAllTasks, listTaskState, cancelTask, finishTask, setNotifyCallback, pushTaskEvent } from './tools/results.js';
 import { listSkills, getSkillContent, createSkill, deleteSkill, provisionSkill } from './tools/skills.js';
 import { consultPeer } from './tools/consult.js';
@@ -514,6 +515,7 @@ export function createServer() {
       handleGetTaskResult,
       handleCancelTask,
       handleFinishTask,
+      handleReleaseSlot,
       handleListTasks,
       handleGetBoardState,
       handleConsultPeer,
@@ -568,6 +570,29 @@ function handleCancelTask(args) {
 
 function handleFinishTask(args) {
   return finishTask(args.task_id, args);
+}
+
+async function handleReleaseSlot(args = {}) {
+  const admissionId = args.admission_id;
+  if (!isNonEmptyString(admissionId)) {
+    return {
+      content: [{ type: 'text', text: '❌ Missing required `admission_id` argument for release_slot.' }],
+      isError: true,
+    };
+  }
+  let released = false;
+  try {
+    const result = await getSlotLedger().release({ admissionId });
+    released = Boolean(result?.released);
+  } catch {
+    // Lock contention or an unavailable ledger is non-fatal: the dead-pid sweep
+    // is the safety net. Report idempotent success so the best-effort caller
+    // never has to retry or fail over a transient.
+    released = false;
+  }
+  return {
+    content: [{ type: 'text', text: JSON.stringify({ ok: true, released }) }],
+  };
 }
 
 function handleListTasks() {
@@ -838,9 +863,31 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   // Route to the correct runner based on provider
   const provider = args.provider || resourceProfile.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
 
+  // Per-task secret → verified-slug correlation (D2.1). Mint a secret bound to
+  // the server-verified slug — the `verified_slug` the parent passed, falling
+  // back to the slug agent-pool resolved — and inject it into the spawned
+  // process so the agent's MCP identity can be verified by the secret rather
+  // than self-claimed in the payload. The plaintext secret is never logged.
+  const serverAssignedSlug = isNonEmptyString(args.verified_slug)
+    ? args.verified_slug
+    : (agentDef?.slug ?? (isNonEmptyString(args.agent_slug) ? args.agent_slug : null));
+  let taskSecret = null;
+  try {
+    taskSecret = getTaskSecretStore().mint({
+      taskId,
+      admissionId: ledgerAdmissionId,
+      serverAssignedSlug,
+    }).secret;
+  } catch {
+    // Secret store unavailable — the connection stays unverified, which the
+    // portal treats as least-privilege. Never fail the spawn over this.
+    taskSecret = null;
+  }
+
   const taskOpts = {
     prompt,
     cwd,
+    taskSecret,
     model: args.model ?? resourceProfile.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0],
     reasoningEffort: normalizeReasoningEffort(
       args.reasoningEffort

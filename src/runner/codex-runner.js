@@ -8,6 +8,7 @@ import { loadConfig } from './config.js';
 import { createProcessWatchdog } from './timeout-manager.js';
 import { createProviderRuntimeEnv } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
+import { TASK_SECRET_ENV } from './task-secret-store.js';
 
 function normalizeCodexEvent(ev) {
   if (ev.type === 'item.completed' && ev.item) {
@@ -122,7 +123,7 @@ function isMissingRolloutError(errors) {
   return errors.some(error => /thread\/resume failed: no rollout found|no rollout found for thread id/i.test(String(error)));
 }
 
-export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approvalMode, timeout, sessionId, taskId, chat_id, resumeFallbackAttempted = false }) {
+export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approvalMode, timeout, sessionId, taskId, chat_id, taskSecret, resumeFallbackAttempted = false }) {
   return new Promise((resolve) => {
     let finalPrompt = prompt;
     try {
@@ -180,6 +181,10 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
         CI: '1',
         AGENT_POOL_DEPTH: String(currentDepth + 1),
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
+        // Set last and unconditionally: the freshly minted per-task secret, or
+        // undefined to scrub any value inherited from the parent process so a
+        // child can never impersonate the parent's verified slug.
+        [TASK_SECRET_ENV]: taskSecret || undefined,
       }),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,

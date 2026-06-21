@@ -13,6 +13,7 @@ import {
   createProviderRuntimeEnv,
 } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
+import { TASK_SECRET_ENV } from './task-secret-store.js';
 
 function permissionMode(approvalMode) {
   if (approvalMode === 'plan') return 'plan';
@@ -75,6 +76,7 @@ export function runClaudeStreaming({
   taskId,
   includeDirs,
   chat_id,
+  taskSecret,
 }) {
   return new Promise((resolve) => {
     let finalPrompt = prompt;
@@ -127,6 +129,10 @@ export function runClaudeStreaming({
         AGENT_POOL_DEPTH: String(currentDepth + 1),
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
         ...(effectiveModel ? { ANTHROPIC_SMALL_FAST_MODEL: effectiveModel } : {}),
+        // Set last and unconditionally: the freshly minted per-task secret, or
+        // undefined to scrub any value inherited from the parent process so a
+        // child can never impersonate the parent's verified slug.
+        [TASK_SECRET_ENV]: taskSecret || undefined,
       })),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,

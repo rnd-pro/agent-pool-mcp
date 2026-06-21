@@ -220,6 +220,21 @@ export function getToolDefinitions(ctx = {}) {
     },
   },
   {
+    name: 'release_slot',
+    description: [
+      'Release a capacity slot in the cross-process slot ledger for a given admission_id.',
+      'Best-effort and idempotent: an unknown or already-released admission returns released:false with ok:true.',
+      'The board calls this when a workflow step closes so the slot frees immediately instead of waiting for the dead-pid sweep.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        admission_id: { type: 'string', description: 'The board-minted admission id whose ledger slot should be released.' },
+      },
+      required: ['admission_id'],
+    },
+  },
+  {
     name: 'list_sessions',
     description: 'List available Antigravity CLI conversations for a project directory when the CLI exposes them. Use session_id with delegate_task to resume.',
     inputSchema: {
