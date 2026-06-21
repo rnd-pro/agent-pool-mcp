@@ -13,6 +13,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseMarkdownFrontmatter } from '../tools/frontmatter.js';
+import { getTeamMemoryRoot } from '../runtime/paths.js';
 
 const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
@@ -27,13 +28,26 @@ function getAgentRootCandidates(cwd) {
   return [...new Set(candidates)];
 }
 
-function resolveAgentRoot(cwd, slug = null) {
+// Resolve the agents + skills content directories. Prefer the configured
+// team-memory content root (the consolidated single shared clone, flat
+// `agents/` + `skills/` layout); fall back to a legacy per-project
+// `.agent-portal/{agents,skills}` checkout when team memory is unconfigured or
+// does not carry the requested agent.
+function resolveContentDirs(cwd, slug = null) {
+  const memRoot = getTeamMemoryRoot();
+  if (memRoot) {
+    const agentsDir = join(memRoot, 'agents');
+    const hit = slug ? existsSync(join(agentsDir, `${slug}.md`)) : existsSync(agentsDir);
+    if (hit) return { agentsDir, skillsDir: join(memRoot, 'skills') };
+  }
   for (const root of getAgentRootCandidates(cwd)) {
     const agentsDir = join(root, '.agent-portal', 'agents');
-    if (slug && existsSync(join(agentsDir, `${slug}.md`))) return root;
-    if (!slug && existsSync(agentsDir)) return root;
+    const hit = slug ? existsSync(join(agentsDir, `${slug}.md`)) : existsSync(agentsDir);
+    if (hit) return { agentsDir, skillsDir: join(root, '.agent-portal', 'skills') };
   }
-  return resolve(cwd || process.cwd());
+  if (memRoot) return { agentsDir: join(memRoot, 'agents'), skillsDir: join(memRoot, 'skills') };
+  const fallback = resolve(cwd || process.cwd());
+  return { agentsDir: join(fallback, '.agent-portal', 'agents'), skillsDir: join(fallback, '.agent-portal', 'skills') };
 }
 
 // ─── Frontmatter Parser ────────────────────────────────────
@@ -136,12 +150,11 @@ function arrayFromMeta(value) {
 export function resolveAgentMetadata(cwd, slug) {
   if (!slug) return null;
 
-  const agentRoot = resolveAgentRoot(cwd, slug);
-  const agentsDir = join(agentRoot, '.agent-portal', 'agents');
+  const { agentsDir } = resolveContentDirs(cwd, slug);
   const filePath = join(agentsDir, `${slug}.md`);
 
   if (!existsSync(filePath)) {
-    console.error(`[agent-resolver] Agent '${slug}' not found in any .agent-portal/agents root for cwd=${cwd}`);
+    console.error(`[agent-resolver] Agent '${slug}' not found (looked in ${agentsDir}) for cwd=${cwd}`);
     return null;
   }
 
@@ -181,17 +194,15 @@ const AGENT_CACHE_TTL = 5000;
 export function resolveAgent(cwd, slug) {
   if (!slug) return null;
 
-  const agentRoot = resolveAgentRoot(cwd, slug);
-  const cacheKey = `${agentRoot}:${slug}`;
+  const { agentsDir, skillsDir } = resolveContentDirs(cwd, slug);
+  const cacheKey = `${agentsDir}:${slug}`;
   const cached = _agentCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts < AGENT_CACHE_TTL)) return cached.def;
 
-  const agentsDir = join(agentRoot, '.agent-portal', 'agents');
-  const skillsDir = join(agentRoot, '.agent-portal', 'skills');
   const filePath = join(agentsDir, `${slug}.md`);
 
   if (!existsSync(filePath)) {
-    console.error(`[agent-resolver] Agent '${slug}' not found in any .agent-portal/agents root for cwd=${cwd}`);
+    console.error(`[agent-resolver] Agent '${slug}' not found (looked in ${agentsDir}) for cwd=${cwd}`);
     return null;
   }
 
@@ -230,8 +241,7 @@ export function resolveAgent(cwd, slug) {
  * @returns {string[]}
  */
 export function listAgentSlugs(cwd) {
-  const agentRoot = resolveAgentRoot(cwd);
-  const agentsDir = join(agentRoot, '.agent-portal', 'agents');
+  const { agentsDir } = resolveContentDirs(cwd);
   if (!existsSync(agentsDir)) return [];
 
   try {
