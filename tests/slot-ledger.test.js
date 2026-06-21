@@ -130,6 +130,35 @@ describe('SlotLedger (WS-LEDGER)', () => {
     );
   });
 
+  it('sync API (acquire/redeem/release/sweep) mirrors the async API', async () => {
+    let ledger = new SlotLedger({ dir });
+    assert.equal(ledger.acquireSync({ admissionId: 's1', groupKey: 'g', limit: 1 }).granted, true);
+    assert.equal(ledger.acquireSync({ admissionId: 's2', groupKey: 'g', limit: 1 }).granted, false);
+    assert.equal(ledger.acquireSync({ admissionId: 's1', groupKey: 'g', limit: 1 }).granted, true); // idempotent
+
+    ledger.redeemSync({ admissionId: 's1', taskId: 't1', pid: process.pid });
+    assert.equal((await ledger.lookup({ admissionId: 's1' })).status, 'running');
+
+    assert.equal(ledger.releaseSync({ admissionId: 's1' }).released, true);
+    assert.equal(await ledger.activeCount({ groupKey: 'g' }), 0);
+  });
+
+  it('sync and async callers share one ledger (cross-API consistency)', async () => {
+    let ledger = new SlotLedger({ dir });
+    await ledger.acquire({ admissionId: 'async-1', groupKey: 'g', limit: 2 });
+    ledger.acquireSync({ admissionId: 'sync-1', groupKey: 'g', limit: 2 });
+    assert.equal(ledger.acquireSync({ admissionId: 'sync-2', groupKey: 'g', limit: 2 }).granted, false);
+    assert.equal((await ledger.acquire({ admissionId: 'async-2', groupKey: 'g', limit: 2 })).granted, false);
+    assert.equal(await ledger.activeCount({ groupKey: 'g' }), 2);
+  });
+
+  it('sweepSync reclaims a dead-holder running slot', () => {
+    let ledger = new SlotLedger({ dir });
+    ledger.acquireSync({ admissionId: 'a', groupKey: 'g', limit: 4 });
+    ledger.redeemSync({ admissionId: 'a', taskId: 't', pid: DEAD_PID });
+    assert.deepEqual(ledger.sweepSync().reclaimed, ['a']);
+  });
+
   it('serializes two OS processes contending for capacity (no over-grant)', async () => {
     let limit = 3;
     let attempts = 12;

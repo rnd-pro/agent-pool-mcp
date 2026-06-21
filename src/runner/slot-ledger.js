@@ -236,6 +236,71 @@ export class SlotLedger {
     });
   }
 
+  // ── Synchronous variants (for the detached daemon's sync tick loop) ──
+  // The daemon runs no interactive traffic, so a brief blocking lock wait is
+  // acceptable; file ops are already sync. Bodies mirror the async methods.
+
+  /** @see acquire */
+  acquireSync(req) {
+    let { admissionId, groupKey, limit, leaseEpoch = 0 } = req || {};
+    if (!admissionId) throw new Error('acquireSync: admissionId is required');
+    return this._withLockSync((ledger) => {
+      this._sweepInto(ledger);
+      let existing = ledger.slots[admissionId];
+      if (existing) return { granted: true, token: admissionId, slot: existing };
+      if (Number.isFinite(limit) && limit >= 0 && this._countGroup(ledger, groupKey) >= limit) {
+        return { granted: false, reason: 'group_at_capacity' };
+      }
+      let slot = {
+        admissionId, groupKey: groupKey || null, leaseEpoch, status: 'reserved',
+        pid: this._selfPid, host: this._host, generation: this._generation,
+        taskId: null, reservedAt: this._now(), updatedAt: this._now(),
+      };
+      ledger.slots[admissionId] = slot;
+      this._writeLedger(ledger);
+      return { granted: true, token: admissionId, slot };
+    });
+  }
+
+  /** @see redeem */
+  redeemSync(req) {
+    let { admissionId, taskId, pid, host, generation } = req || {};
+    if (!admissionId) throw new Error('redeemSync: admissionId is required');
+    return this._withLockSync((ledger) => {
+      let slot = ledger.slots[admissionId];
+      if (!slot) return { ok: false, reason: 'unknown_admission' };
+      slot.status = 'running';
+      slot.taskId = taskId ?? slot.taskId ?? null;
+      if (Number.isInteger(pid)) slot.pid = pid;
+      if (host) slot.host = host;
+      if (generation) slot.generation = generation;
+      slot.updatedAt = this._now();
+      this._writeLedger(ledger);
+      return { ok: true, slot };
+    });
+  }
+
+  /** @see release */
+  releaseSync(req) {
+    let { admissionId } = req || {};
+    if (!admissionId) throw new Error('releaseSync: admissionId is required');
+    return this._withLockSync((ledger) => {
+      if (!ledger.slots[admissionId]) return { released: false, alreadyReleased: true };
+      delete ledger.slots[admissionId];
+      this._writeLedger(ledger);
+      return { released: true };
+    });
+  }
+
+  /** @see sweep */
+  sweepSync(req = {}) {
+    return this._withLockSync((ledger) => {
+      let reclaimed = this._sweepInto(ledger, req.currentEpochByGroup);
+      if (reclaimed.length) this._writeLedger(ledger);
+      return { reclaimed };
+    });
+  }
+
   // ── Internals ──────────────────────────────────────────
 
   _countGroup(ledger, groupKey) {
@@ -332,23 +397,53 @@ export class SlotLedger {
   async _acquireLock() {
     let deadline = this._now() + this._lockTimeoutMs;
     for (;;) {
-      try {
-        let fd = fs.openSync(this._lockPath, 'wx'); // O_CREAT | O_EXCL
-        try {
-          fs.writeSync(fd, JSON.stringify({ pid: this._selfPid, host: this._host, acquiredAt: this._now() }));
-        } finally {
-          fs.closeSync(fd);
-        }
-        return;
-      } catch (err) {
-        if (err.code !== 'EEXIST') throw err;
-        this._maybeBreakStaleLock();
-        if (this._now() >= deadline) {
-          throw new LedgerLockTimeoutError(`SlotLedger: lock acquire timed out after ${this._lockTimeoutMs}ms`);
-        }
-        await this._sleep(this._spinMs);
+      if (this._tryWriteLock()) return;
+      this._maybeBreakStaleLock();
+      if (this._now() >= deadline) {
+        throw new LedgerLockTimeoutError(`SlotLedger: lock acquire timed out after ${this._lockTimeoutMs}ms`);
       }
+      await this._sleep(this._spinMs);
     }
+  }
+
+  // Single attempt to create the O_EXCL lock; true on success, false on EEXIST.
+  _tryWriteLock() {
+    try {
+      let fd = fs.openSync(this._lockPath, 'wx'); // O_CREAT | O_EXCL
+      try {
+        fs.writeSync(fd, JSON.stringify({ pid: this._selfPid, host: this._host, acquiredAt: this._now() }));
+      } finally {
+        fs.closeSync(fd);
+      }
+      return true;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      return false;
+    }
+  }
+
+  // Synchronous lock acquire — blocks via Atomics.wait (no CPU busy-spin). Used
+  // only by the daemon's sync tick; the critical section is ~ms.
+  _withLockSync(fn) {
+    if (!fs.existsSync(this._dir)) fs.mkdirSync(this._dir, { recursive: true });
+    let deadline = this._now() + this._lockTimeoutMs;
+    for (;;) {
+      if (this._tryWriteLock()) break;
+      this._maybeBreakStaleLock();
+      if (this._now() >= deadline) {
+        throw new LedgerLockTimeoutError(`SlotLedger: lock acquire timed out after ${this._lockTimeoutMs}ms`);
+      }
+      this._sleepSync(this._spinMs);
+    }
+    try {
+      return fn(this._readLedger());
+    } finally {
+      this._releaseLock();
+    }
+  }
+
+  _sleepSync(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   }
 
   // Break a stale lock atomically: rename it aside (only one racer wins the
