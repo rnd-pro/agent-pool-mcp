@@ -22,6 +22,8 @@ import { killGroup } from '../runner/process-manager.js';
 import { consumeSignals, deleteSignals } from './run-signals.js';
 import { createClaudeDirectEnv } from '../runner/provider-config.js';
 import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
+import { getSlotLedger } from '../runner/slot-ledger.js';
+import { admitStep, redeemStepSlot, releaseStepSlot } from './step-capacity.js';
 
 const ACTIVE_POLL_INTERVAL_MS = 3_000;
 const POLL_INTERVAL_MS = 30_000;
@@ -351,6 +353,8 @@ function applySignals(run, signals, pipeline) {
         step.signaled = true;
         step.completedAt = new Date().toISOString();
         if (signal.output) step.output = signal.output;
+        releaseStepSlot(getSlotLedger(), step.admissionId);
+        step.admissionId = null;
         modified = true;
         console.error(`[pipeline] Signal: step "${signal.stepName}" completed`);
       }
@@ -365,6 +369,8 @@ function applySignals(run, signals, pipeline) {
         // Bounce limit reached
         targetStep.status = 'failed';
         targetStep.lastBounceReason = `Bounce limit (${maxBounces}) reached. Last: ${signal.reason}`;
+        releaseStepSlot(getSlotLedger(), targetStep.admissionId);
+        targetStep.admissionId = null;
         run.status = 'failed';
         run.completedAt = new Date().toISOString();
         console.error(`[pipeline] Bounce limit reached for "${signal.stepName}"`);
@@ -379,6 +385,10 @@ function applySignals(run, signals, pipeline) {
         if (targetStep.pid && !pidsToKill.includes(targetStep.pid)) pidsToKill.push(targetStep.pid);
         for (const pid of pidsToKill) killGroup(pid);
 
+        // Release the slot the killed attempt held; the bounce_pending re-spawn
+        // re-admits and re-reserves under a fresh deterministic admissionId.
+        releaseStepSlot(getSlotLedger(), targetStep.admissionId);
+        targetStep.admissionId = null;
         targetStep.pid = null;
         targetStep.pids = [];
         targetStep.exitCode = null;
@@ -394,7 +404,11 @@ function applySignals(run, signals, pipeline) {
     } else if (signal.type === 'CANCEL_RUN') {
       // Cancel the entire run
       for (const [name, step] of Object.entries(run.steps)) {
-        if (step.status === 'running') step.status = 'cancelled';
+        if (step.status === 'running') {
+          step.status = 'cancelled';
+          releaseStepSlot(getSlotLedger(), step.admissionId);
+          step.admissionId = null;
+        }
         if (step.status === 'pending') step.status = 'skipped';
       }
       run.status = 'cancelled';
@@ -632,11 +646,20 @@ function tickPipelines() {
 
       // ── Handle bounce_pending: re-run the step ──
       if (step.status === 'bounce_pending') {
+        const admission = admitStep(getSlotLedger(), { stepDef, run, runId, getGroup, cwd });
+        if (!admission.admitted) {
+          console.error(`[pipeline] step deferred: group at capacity (step "${stepDef.name}", group: ${admission.group}, run: ${runId})`);
+          continue;
+        }
         step.status = 'running';
         step.startedAt = new Date().toISOString();
+        step.admissionId = admission.admissionId;
         const pids = spawnStep(stepDef, run, runId, step.lastBounceReason);
         step.pids = pids;
-        if (pids.length > 0) step.pid = pids[0];
+        if (pids.length > 0) {
+          step.pid = pids[0];
+          redeemStepSlot(getSlotLedger(), step.admissionId, { runId, stepName: stepDef.name, pid: pids[0] });
+        }
         modified = true;
         continue;
       }
@@ -659,6 +682,8 @@ function tickPipelines() {
 
             step.status = 'failed';
             step.completedAt = new Date().toISOString();
+            releaseStepSlot(getSlotLedger(), step.admissionId);
+            step.admissionId = null;
             console.error(`[pipeline] Step "${stepDef.name}" parallel failed (exit: ${step.exitCode})`);
             if (pipeline.onError === 'stop') {
               run.status = 'failed';
@@ -669,6 +694,8 @@ function tickPipelines() {
             // All dead and no errors
             step.status = 'success';
             step.completedAt = new Date().toISOString();
+            releaseStepSlot(getSlotLedger(), step.admissionId);
+            step.admissionId = null;
             console.error(`[pipeline] Step "${stepDef.name}" parallel completed successfully`);
             modified = true;
           }
@@ -694,6 +721,8 @@ function tickPipelines() {
                   run.completedAt = new Date().toISOString();
                 }
               }
+              releaseStepSlot(getSlotLedger(), step.admissionId);
+              step.admissionId = null;
               modified = true;
             }
           }
@@ -730,11 +759,20 @@ function tickPipelines() {
         }
 
         if (shouldStart && run.status === 'running') {
+          const admission = admitStep(getSlotLedger(), { stepDef, run, runId, getGroup, cwd });
+          if (!admission.admitted) {
+            console.error(`[pipeline] step deferred: group at capacity (step "${stepDef.name}", group: ${admission.group}, run: ${runId})`);
+            continue;
+          }
           step.status = 'running';
           step.startedAt = new Date().toISOString();
+          step.admissionId = admission.admissionId;
           const pids = spawnStep(stepDef, run, runId);
           step.pids = pids;
-          if (pids.length > 0) step.pid = pids[0];
+          if (pids.length > 0) {
+            step.pid = pids[0];
+            redeemStepSlot(getSlotLedger(), step.admissionId, { runId, stepName: stepDef.name, pid: pids[0] });
+          }
           modified = true;
         }
       }
@@ -743,11 +781,20 @@ function tickPipelines() {
       if (step.status === 'waiting_bounce') {
         const depStepName = stepDef.trigger?.step;
         if (depStepName && run.steps[depStepName]?.status === 'success') {
+          const admission = admitStep(getSlotLedger(), { stepDef, run, runId, getGroup, cwd });
+          if (!admission.admitted) {
+            console.error(`[pipeline] step deferred: group at capacity (step "${stepDef.name}", group: ${admission.group}, run: ${runId})`);
+            continue;
+          }
           step.status = 'running';
           step.startedAt = new Date().toISOString();
+          step.admissionId = admission.admissionId;
           const pids = spawnStep(stepDef, run, runId);
           step.pids = pids;
-          if (pids.length > 0) step.pid = pids[0];
+          if (pids.length > 0) {
+            step.pid = pids[0];
+            redeemStepSlot(getSlotLedger(), step.admissionId, { runId, stepName: stepDef.name, pid: pids[0] });
+          }
           modified = true;
         }
       }
@@ -777,6 +824,10 @@ function tickPipelines() {
 
 function tick() {
   const now = new Date();
+  // Self-heal: reclaim dead-pid/stale ledger slots in the server-down topology
+  // so a crashed daemon-spawned step never permanently holds a group's capacity.
+  try { getSlotLedger().sweepSync(); }
+  catch (err) { console.error(`[pipeline] ledger sweep failed: ${err.message}`); }
   const schedules = readSchedules();
   const hasActivePipeline = tickPipelines();
 
