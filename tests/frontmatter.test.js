@@ -11,6 +11,17 @@ import { buildAgentCatalog, resolveAgent, resolveAgentMetadata } from '../src/ag
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-frontmatter-${Date.now()}`);
 
+function withMemoryRoot(root, fn) {
+  const previous = process.env.AGENT_PORTAL_MEMORY_ROOT;
+  process.env.AGENT_PORTAL_MEMORY_ROOT = root;
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+    else process.env.AGENT_PORTAL_MEMORY_ROOT = previous;
+  }
+}
+
 describe('shared frontmatter parser', () => {
   after(() => {
     fs.rmSync(TEST_CWD, { recursive: true, force: true });
@@ -55,7 +66,8 @@ autoload: false
 ---
 Skill body`);
 
-    const skill = listSkills(TEST_CWD).find(item => item.name === 'nested-skill');
+    const skill = withMemoryRoot(path.join(TEST_CWD, '.agent-portal'), () =>
+      listSkills(TEST_CWD).find(item => item.name === 'nested-skill'));
 
     assert.ok(skill);
     assert.deepStrictEqual(skill.tags, ['context', 'parser']);
@@ -87,8 +99,8 @@ tags: [demo]
 ---
 Skill body`);
 
-    const skills = listSkills(TEST_CWD);
-    const skill = skills.find(item => item.name === 'demo-skill');
+    const skill = withMemoryRoot(path.join(TEST_CWD, '.agent-portal'), () =>
+      listSkills(TEST_CWD).find(item => item.name === 'demo-skill'));
 
     assert.ok(skill);
     assert.equal(skill.tier, 'workspace');

@@ -2,13 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { parseFrontmatter } from './markdown-parser.js';
+import { getTeamMemoryRoot, getTeamMemoryPath } from '../runtime/paths.js';
 
 function toPosix(value) {
   return String(value || '').replaceAll(path.sep, '/').replace(/^\.?\//, '');
-}
-
-function portalRoot(cwd) {
-  return path.join(cwd, '.agent-portal');
 }
 
 function fileExists(cwd, rel) {
@@ -81,8 +78,10 @@ function scanMarkdownFiles(dir, options = {}) {
   return files;
 }
 
-function listWorkspaceNames(cwd) {
-  let root = path.join(portalRoot(cwd), 'workspace');
+function listWorkspaceNames() {
+  let memoryRoot = getTeamMemoryRoot();
+  if (!memoryRoot) return [];
+  let root = path.join(memoryRoot, 'workspace');
   if (!fs.existsSync(root)) return [];
   return fs.readdirSync(root, { withFileTypes: true })
     .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
@@ -90,20 +89,21 @@ function listWorkspaceNames(cwd) {
     .sort((a, b) => a.localeCompare(b));
 }
 
-function listContextFiles(cwd) {
-  let root = portalRoot(cwd);
+function listContextFiles() {
+  let root = getTeamMemoryRoot();
+  if (!root) return [];
   let globalAndProvider = scanMarkdownFiles(path.join(root, 'contexts'), {
     skipNames: ['projects'],
   });
-  let workspaceContexts = listWorkspaceNames(cwd)
+  let workspaceContexts = listWorkspaceNames()
     .map(name => path.join(root, 'workspace', name, 'context.md'))
     .filter(filePath => fs.existsSync(filePath));
   return [...globalAndProvider, ...workspaceContexts];
 }
 
-function contextFromFile(cwd, filePath) {
-  let root = portalRoot(cwd);
-  let rel = toPosix(path.relative(root, filePath));
+function contextFromFile(filePath) {
+  let root = getTeamMemoryRoot();
+  let rel = toPosix(root ? path.relative(root, filePath) : filePath);
   let workspaceMatch = rel.match(/^workspace\/([^/]+)\/context\.md$/);
   let { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, 'utf8'));
 
@@ -119,18 +119,20 @@ function contextFromFile(cwd, filePath) {
   };
 }
 
-export function getGlobalSkillsDir(cwd) {
-  return path.join(portalRoot(cwd), 'skills');
+export function getGlobalSkillsDir() {
+  let root = getTeamMemoryRoot();
+  return root ? path.join(root, 'skills') : null;
 }
 
-export function getGlobalWorkflowsDir(cwd) {
-  return path.join(portalRoot(cwd), 'workflows');
+export function getGlobalWorkflowsDir() {
+  let root = getTeamMemoryRoot();
+  return root ? path.join(root, 'workflows') : null;
 }
 
 export function resolveActiveContexts(cwd, files = []) {
   let scopeRank = { global: 0, provider: 1, project: 2 };
-  return listContextFiles(cwd)
-    .map(filePath => contextFromFile(cwd, filePath))
+  return listContextFiles()
+    .map(filePath => contextFromFile(filePath))
     .filter(context => contextIsActive(context, files, cwd))
     .sort((a, b) => (scopeRank[a.scope] ?? 3) - (scopeRank[b.scope] ?? 3) || a.id.localeCompare(b.id))
     .map(context => ({
@@ -151,10 +153,12 @@ export function activeWorkspaceNames(cwd, files = []) {
 }
 
 export function getSkillDirs(cwd, files = []) {
-  let dirs = [{ dir: getGlobalSkillsDir(cwd), tier: 'global', workspace: null }];
+  let root = getTeamMemoryRoot();
+  if (!root) return [];
+  let dirs = [{ dir: getGlobalSkillsDir(), tier: 'global', workspace: null }];
   for (let workspace of activeWorkspaceNames(cwd, files)) {
     dirs.push({
-      dir: path.join(portalRoot(cwd), 'workspace', workspace, 'skills'),
+      dir: path.join(root, 'workspace', workspace, 'skills'),
       tier: 'workspace',
       workspace,
     });
@@ -163,10 +167,12 @@ export function getSkillDirs(cwd, files = []) {
 }
 
 export function getWorkflowDirs(cwd, files = []) {
-  let dirs = [{ dir: getGlobalWorkflowsDir(cwd), idPrefix: '', scope: 'global', workspace: null }];
+  let root = getTeamMemoryRoot();
+  if (!root) return [];
+  let dirs = [{ dir: getGlobalWorkflowsDir(), idPrefix: '', scope: 'global', workspace: null }];
   for (let workspace of activeWorkspaceNames(cwd, files)) {
     dirs.push({
-      dir: path.join(portalRoot(cwd), 'workspace', workspace, 'workflows'),
+      dir: path.join(root, 'workspace', workspace, 'workflows'),
       idPrefix: workspace,
       scope: 'workspace',
       workspace,
@@ -179,11 +185,11 @@ export function getSingleActiveWorkspace(cwd, files = []) {
   let workspaces = activeWorkspaceNames(cwd, files);
   if (workspaces.length === 1) return workspaces[0];
   if (workspaces.length === 0) {
-    throw new Error('No active .agent-portal/workspace/<project>/context.md matched this repository');
+    throw new Error('No active workspace/<project>/context.md matched this repository');
   }
   throw new Error(`Multiple active workspaces matched: ${workspaces.join(', ')}`);
 }
 
 export function getWorkspaceSkillsDir(cwd, workspace) {
-  return path.join(portalRoot(cwd), 'workspace', workspace, 'skills');
+  return getTeamMemoryPath('workspace', workspace, 'skills');
 }

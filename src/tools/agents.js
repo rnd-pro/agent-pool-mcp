@@ -6,9 +6,9 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
 import { parseFrontmatter } from './markdown-parser.js';
 import { findSkill } from './skills.js';
+import { getTeamMemoryPath } from '../runtime/paths.js';
 
 /**
  * Resolve atomic skills into the agent body.
@@ -61,10 +61,10 @@ export function resolveSkills(cwd, frontmatterSkills, body) {
  */
 export function loadAgent(cwd, agentSlug) {
   const fileName = agentSlug.endsWith('.md') ? agentSlug : `${agentSlug}.md`;
-  const agentPath = path.join(cwd, '.agent-portal', 'agents', fileName);
+  const agentPath = getTeamMemoryPath('agents', fileName);
 
-  if (!fs.existsSync(agentPath)) {
-    throw new Error(`Agent not found: ${agentPath}`);
+  if (!agentPath || !fs.existsSync(agentPath)) {
+    throw new Error(`Agent not found: ${agentSlug}`);
   }
 
   const content = fs.readFileSync(agentPath, 'utf-8');
