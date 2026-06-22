@@ -9,6 +9,7 @@ import { loadConfig } from './config.js';
 import { createProcessWatchdog } from './timeout-manager.js';
 import { createOpenCodeEnv, cleanupTmpConfig, createProviderRuntimeEnv } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
+import { TASK_SECRET_ENV } from './task-secret-store.js';
 
 function normalizeEvent(ev) {
   switch (ev.type) {
@@ -77,7 +78,7 @@ export async function runOpencodeStreaming(options) {
   return runOpencodeStreamingInternal(options);
 }
 
-async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessionId, taskId, skill, groupConfig, chat_id }) {
+async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessionId, taskId, skill, groupConfig, chat_id, taskSecret }) {
   return new Promise((resolve, reject) => {
     let args = ['run', '--format', 'json'];
 
@@ -127,7 +128,7 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     let envOverrides = {};
     let hubTmpDir = null;
     if (portalUrl) {
-      let hub = createOpenCodeEnv(portalUrl);
+      let hub = createOpenCodeEnv(portalUrl, taskSecret);
       hubTmpDir = hub.tmpDir;
       envOverrides = hub.envOverrides;
     }
@@ -143,6 +144,10 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
         AGENT_POOL_DEPTH: String(currentDepth + 1),
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
         ...envOverrides,
+        // Set last and unconditionally: the freshly minted per-task secret, or
+        // undefined to scrub any value inherited from the parent process so a
+        // child can never impersonate the parent's verified slug.
+        [TASK_SECRET_ENV]: taskSecret || undefined,
       }),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,

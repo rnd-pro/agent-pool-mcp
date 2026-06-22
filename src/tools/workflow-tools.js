@@ -8,15 +8,18 @@ import path from 'node:path';
 
 import { getTrackedFiles } from './file-tracker.js';
 import { getWorkflowDirs } from './memory-layout.js';
+import { getTeamMemoryRoot } from '../runtime/paths.js';
 import { buildTagIndexForDirs, searchByTags, toLightList } from './workflow-index.js';
 
 /**
- * @param {object} args
- * @param {string} defaultCwd
+ * Team-memory root used to derive workflow group names from node file paths.
+ * Falls back to the current directory when team memory is unconfigured; in that
+ * case the workflow index is empty, so the value is never actually consulted.
+ *
  * @returns {string}
  */
-function getWorkflowsDir(args = {}, defaultCwd = process.cwd()) {
-  return path.join(args.cwd || defaultCwd, '.agent-portal');
+function getWorkflowsDir() {
+  return getTeamMemoryRoot() || process.cwd();
 }
 
 /**
@@ -52,7 +55,7 @@ export function handleListWorkflows(args = {}, defaultCwd = process.cwd()) {
   const groups = new Map();
 
   for (const node of nodes.values()) {
-    let rel = path.relative(getWorkflowsDir(args, defaultCwd), node.filePath);
+    let rel = path.relative(getWorkflowsDir(), node.filePath);
     let parts = rel.split(path.sep);
     let groupName = parts[0] === 'workspace' && parts[1] ? parts[1] : parts[1] || node.id;
     if (!groups.has(groupName)) {

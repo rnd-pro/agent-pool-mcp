@@ -1,10 +1,11 @@
-import { describe, it, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 let tempDirs = [];
+let savedMemoryRoot;
 
 function writeFixtureFile(cwd, relativePath, content) {
   let filePath = path.join(cwd, relativePath);
@@ -15,6 +16,7 @@ function writeFixtureFile(cwd, relativePath, content) {
 function makeProject() {
   let cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-context-resolver-'));
   tempDirs.push(cwd);
+  process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(cwd, '.agent-portal');
   fs.writeFileSync(path.join(cwd, 'package.json'), '{}');
 
   writeFixtureFile(cwd, '.agent-portal/agents/ui-engineer.md', `---
@@ -138,8 +140,14 @@ tags: [context, workflow, tooling, server]
 }
 
 describe('context resolver', () => {
+  beforeEach(() => {
+    savedMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+  });
+
   afterEach(() => {
     for (let dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+    if (savedMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+    else process.env.AGENT_PORTAL_MEMORY_ROOT = savedMemoryRoot;
   });
 
   it('classifies UI tasks without escalating to orchestrator profile', async () => {

@@ -1,12 +1,16 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 
-const SCRIPT_PATH = path.resolve('src/scheduler/resolve-content.js');
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPT_PATH = path.join(PACKAGE_ROOT, 'src/scheduler/resolve-content.js');
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-resolve-test-${Date.now()}`);
+const MEMORY_ROOT = path.join(TEST_CWD, '.agent-portal');
+const CHILD_ENV = { ...process.env, AGENT_PORTAL_MEMORY_ROOT: MEMORY_ROOT };
 
 describe('resolve-content.js', () => {
   before(() => {
@@ -53,6 +57,7 @@ description: "Formulate a hypothesis."
     try {
       const output = execFileSync('node', [SCRIPT_PATH, JSON.stringify(sourceObj)], {
         cwd: TEST_CWD,
+        env: CHILD_ENV,
         encoding: 'utf-8'
       });
       return output.trim();
@@ -63,7 +68,7 @@ description: "Formulate a hypothesis."
 
   it('fails with invalid JSON', () => {
     try {
-      execFileSync('node', [SCRIPT_PATH, 'invalid_json'], { cwd: TEST_CWD });
+      execFileSync('node', [SCRIPT_PATH, 'invalid_json'], { cwd: TEST_CWD, env: CHILD_ENV });
       assert.fail('Should have thrown');
     } catch (e) {
       assert.strictEqual(e.status, 1);

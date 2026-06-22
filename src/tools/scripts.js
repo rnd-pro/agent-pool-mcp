@@ -1,6 +1,6 @@
 /**
  * Scripts Database — tools for managing JIT automation scripts.
- * Agents can save and list scripts in the .agent-portal/scripts/ directory.
+ * Agents can save and list scripts in the team-memory `scripts/` directory.
  *
  * @module agent-pool/tools/scripts
  */
@@ -8,29 +8,34 @@
 import { writeFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const SCRIPTS_DIR = '.agent-portal/scripts';
+import { getTeamMemoryPath } from '../runtime/paths.js';
+
+const SCRIPTS_SEGMENT = 'scripts';
 
 /**
- * Get the scripts directory path for a project.
+ * Resolve the scripts directory inside team memory, or null when unconfigured.
  *
- * @param {string} cwd - Project directory
- * @returns {string}
+ * @returns {string|null}
  */
-function getScriptsDir(cwd) {
-  return join(cwd, SCRIPTS_DIR);
+function getScriptsDir() {
+  return getTeamMemoryPath(SCRIPTS_SEGMENT);
 }
 
 /**
  * Save a script to the database.
  *
- * @param {string} cwd - Project directory
+ * @param {string} cwd - Project directory (unused; scripts live in team memory)
  * @param {string} name - Name of the script (without extension)
  * @param {string} code - The script content
  * @param {string} [ext="js"] - Extension (e.g. "js", "sh", "py")
- * @returns {string} The relative path to the saved script
+ * @returns {string} The path to the saved script, relative to the team-memory root
+ * @throws {Error} When team memory is not configured
  */
 export function saveScript(cwd, name, code, ext = 'js') {
-  const dir = getScriptsDir(cwd);
+  const dir = getScriptsDir();
+  if (!dir) {
+    throw new Error('Cannot save script: team memory is not configured');
+  }
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -39,18 +44,18 @@ export function saveScript(cwd, name, code, ext = 'js') {
   const filePath = join(dir, fileName);
 
   writeFileSync(filePath, code, 'utf-8');
-  return join(SCRIPTS_DIR, fileName);
+  return join(SCRIPTS_SEGMENT, fileName);
 }
 
 /**
  * List all scripts in the database.
  *
- * @param {string} cwd - Project directory
+ * @param {string} cwd - Project directory (unused; scripts live in team memory)
  * @returns {Array<{ name: string, ext: string, size: number, path: string }>}
  */
 export function listScripts(cwd) {
-  const dir = getScriptsDir(cwd);
-  if (!existsSync(dir)) {
+  const dir = getScriptsDir();
+  if (!dir || !existsSync(dir)) {
     return [];
   }
 
@@ -70,7 +75,7 @@ export function listScripts(cwd) {
       name,
       ext,
       size,
-      path: join(SCRIPTS_DIR, file)
+      path: join(SCRIPTS_SEGMENT, file)
     };
   });
 }

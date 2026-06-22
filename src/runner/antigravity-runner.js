@@ -9,6 +9,7 @@ import { setTaskPid, updateTaskResult, pushTaskEvent, pushTaskStderr } from '../
 import { createProcessWatchdog } from './timeout-manager.js';
 import { createAntigravityEnv, cleanupTmpConfig, createProviderRuntimeEnv } from './provider-config.js';
 import { resolvePortalUrl } from './url-resolver.js';
+import { TASK_SECRET_ENV } from './task-secret-store.js';
 
 const ANTIGRAVITY_BINARY = 'agy';
 const DEFAULT_APPROVAL_MODE = 'yolo';
@@ -119,7 +120,7 @@ function buildRunResult({ events, plainText, stderrData, code, sessionId, softTi
   };
 }
 
-export function runAntigravityStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy, includeDirs, chat_id }) {
+export function runAntigravityStreaming({ prompt, cwd, model, approvalMode, timeout, sessionId, taskId, runner: runnerId, policy, includeDirs, chat_id, taskSecret }) {
   return new Promise((resolve) => {
     let runner = getRunner(runnerId);
     let isRemote = runner.type === 'ssh';
@@ -150,6 +151,9 @@ export function runAntigravityStreaming({ prompt, cwd, model, approvalMode, time
       }
       let envOverrides = {};
       if (portalUrl) {
+        // Antigravity carries only a URL env var (no MCP config file), so it
+        // cannot attach the per-task secret header; its connections resolve to
+        // the anonymous read-only principal at the portal.
         let hub = createAntigravityEnv(portalUrl);
         hubTmpDir = hub.tmpDir;
         envOverrides = hub.envOverrides;
@@ -163,6 +167,11 @@ export function runAntigravityStreaming({ prompt, cwd, model, approvalMode, time
           CI: '1',
           AGENT_POOL_DEPTH: String(currentDepth + 1),
           ...envOverrides,
+          // Set last and unconditionally: the freshly minted per-task secret, or
+          // undefined to scrub any value inherited from the parent process so a
+          // child can never impersonate the parent's verified slug. Local leg
+          // only — the SSH leg is a different uid/host outside same-uid scope.
+          [TASK_SECRET_ENV]: taskSecret || undefined,
         }),
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,

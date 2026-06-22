@@ -12,6 +12,7 @@ export function createToolRouter({ handlers, guardToolCall, getActiveTasks }) {
     get_task_result: handlers.handleGetTaskResult,
     cancel_task: handlers.handleCancelTask,
     finish_task: handlers.handleFinishTask,
+    release_slot: handlers.handleReleaseSlot,
     list_tasks: handlers.handleListTasks,
     get_board_state: handlers.handleGetBoardState,
     consult_peer: handlers.handleConsultPeer,
