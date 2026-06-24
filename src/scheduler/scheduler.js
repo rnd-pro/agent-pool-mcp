@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { nextCronRun } from './cron.js';
-import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
+import { getProjectStatePath } from '../runtime/paths.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAEMON_SCRIPT = join(__dirname, 'daemon.js');
@@ -24,16 +24,8 @@ function schedulePath(cwd) {
   return getProjectStatePath(cwd, SCHEDULE_FILE);
 }
 
-function legacySchedulePath(cwd) {
-  return getLegacyAgentPortalPath(cwd, SCHEDULE_FILE);
-}
-
 function resultsDir(cwd) {
   return getProjectStatePath(cwd, RESULTS_DIR);
-}
-
-function legacyResultsDir(cwd) {
-  return getLegacyAgentPortalPath(cwd, RESULTS_DIR);
 }
 
 function pidPath(cwd) {
@@ -48,7 +40,7 @@ function pidPath(cwd) {
  * @returns {Array<object>}
  */
 export function readSchedules(cwd) {
-  const filePath = existsSync(schedulePath(cwd)) ? schedulePath(cwd) : legacySchedulePath(cwd);
+  const filePath = schedulePath(cwd);
   if (!existsSync(filePath)) return [];
   try {
     return JSON.parse(readFileSync(filePath, 'utf-8'));
@@ -154,7 +146,7 @@ export function listSchedules(cwd) {
  * @returns {Array<object>}
  */
 export function getScheduledResults(cwd, scheduleId) {
-  const dir = existsSync(resultsDir(cwd)) ? resultsDir(cwd) : legacyResultsDir(cwd);
+  const dir = resultsDir(cwd);
   if (!existsSync(dir)) return [];
 
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'));

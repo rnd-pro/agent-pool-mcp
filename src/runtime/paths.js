@@ -66,7 +66,3 @@ export function getProjectStatePath(cwd = process.cwd(), ...parts) {
 export function ensureDirFor(filePath) {
   mkdirSync(path.dirname(filePath), { recursive: true });
 }
-
-export function getLegacyAgentPortalPath(cwd = process.cwd(), ...parts) {
-  return path.join(path.resolve(cwd || process.cwd()), '.agent-portal', ...parts);
-}

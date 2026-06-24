@@ -1,8 +1,8 @@
 /**
  * Skills management — team-global and active workspace skill system for CLI agents.
  *
- * Global skills live in `.agent-portal/skills/`.
- * Project skills live in `.agent-portal/workspace/<project>/skills/`.
+ * Global skills live in the team-memory `skills/` dir.
+ * Project skills live in the team-memory `workspace/<project>/skills/` dir.
  * Managed as markdown files with YAML frontmatter.
  *
  * @module agent-pool/tools/skills

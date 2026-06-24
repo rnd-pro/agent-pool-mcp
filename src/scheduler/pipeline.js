@@ -1,8 +1,9 @@
 /**
  * Pipeline management — CRUD for pipeline definitions and run state.
  *
- * Pipelines are stored as JSON templates in .agent-portal/pipelines/.
- * Each execution creates local run state in the portal home directory.
+ * Pipeline definitions are shared content: they are stored as JSON templates in the team-memory
+ * `pipelines/` directory (single source of truth). Each execution creates local run state in the
+ * portal home project-state directory.
  *
  * @module agent-pool/scheduler/pipeline
  */
@@ -13,10 +14,16 @@ import { randomUUID } from 'node:crypto';
 import { ensureDaemon } from './scheduler.js';
 import { killGroup } from '../runner/process-manager.js';
 import { writeSignal } from './run-signals.js';
-import { getProjectStatePath } from '../runtime/paths.js';
+import { getProjectStatePath, getTeamMemoryPath } from '../runtime/paths.js';
 
-const PIPELINES_DIR = '.agent-portal/pipelines';
 const RUNS_DIR = 'runs';
+
+// Pipeline definitions live in the team-memory `pipelines/` dir (single source of truth). Returns null
+// when team memory is unconfigured — callers degrade to "no pipelines" rather than reading a stale
+// per-project `.agent-portal/pipelines` checkout.
+function pipelinesDir() {
+  return getTeamMemoryPath('pipelines');
+}
 
 function runsDir(cwd) {
   return getProjectStatePath(cwd, RUNS_DIR);
@@ -65,7 +72,8 @@ function normalizeTrigger(trigger, i, steps) {
  * @returns {{ pipelineId: string, path: string }}
  */
 export function createPipeline(cwd, { name, steps, onError }) {
-  const dir = join(cwd, PIPELINES_DIR);
+  const dir = pipelinesDir();
+  if (!dir) throw new Error('Cannot create a pipeline: team memory is not configured.');
   mkdirSync(dir, { recursive: true });
 
   const id = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -102,8 +110,8 @@ export function createPipeline(cwd, { name, steps, onError }) {
  * @returns {Array<object>}
  */
 export function listPipelines(cwd) {
-  const dir = join(cwd, PIPELINES_DIR);
-  if (!existsSync(dir)) return [];
+  const dir = pipelinesDir();
+  if (!dir || !existsSync(dir)) return [];
   return readdirSync(dir)
     .filter(f => f.endsWith('.json'))
     .map(f => {
@@ -120,7 +128,9 @@ export function listPipelines(cwd) {
  * @returns {object|null}
  */
 export function getPipeline(cwd, pipelineId) {
-  const filePath = join(cwd, PIPELINES_DIR, `${pipelineId}.json`);
+  const dir = pipelinesDir();
+  if (!dir) return null;
+  const filePath = join(dir, `${pipelineId}.json`);
   if (!existsSync(filePath)) return null;
   try { return JSON.parse(readFileSync(filePath, 'utf-8')); }
   catch { return null; }

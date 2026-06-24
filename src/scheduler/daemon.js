@@ -21,7 +21,7 @@ import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
 import { consumeSignals, deleteSignals } from './run-signals.js';
 import { createClaudeDirectEnv } from '../runner/provider-config.js';
-import { getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
+import { getProjectStatePath, getTeamMemoryPath } from '../runtime/paths.js';
 import { getSlotLedger } from '../runner/slot-ledger.js';
 import { admitStep, redeemStepSlot, releaseStepSlot } from './step-capacity.js';
 
@@ -36,8 +36,7 @@ const cwd = process.argv[2] || process.cwd();
 const DEFAULT_PROVIDER = 'codex';
 
 function schedulePath() {
-  const localPath = getProjectStatePath(cwd, SCHEDULE_FILE);
-  return existsSync(localPath) ? localPath : getLegacyAgentPortalPath(cwd, SCHEDULE_FILE);
+  return getProjectStatePath(cwd, SCHEDULE_FILE);
 }
 
 function writeSchedulePath() {
@@ -287,7 +286,11 @@ function executeSchedule(schedule) {
 
 // ─── Pipeline tick ──────────────────────────────────────────────────
 
-const PIPELINES_DIR = '.agent-portal/pipelines';
+// Pipeline definitions are shared content: they live in the team-memory `pipelines/` dir (single
+// source of truth), not a per-project `.agent-portal/` checkout. Null when team memory is unconfigured.
+function getPipelinesDir() {
+  return getTeamMemoryPath('pipelines');
+}
 const RUNS_DIR = 'runs';
 
 function runsDir() {
@@ -597,7 +600,7 @@ function tickPipelines() {
     }
   }
 
-  const pipelinesDir = join(cwd, PIPELINES_DIR);
+  const pipelinesDir = getPipelinesDir();
   let hasActive = false;
 
   // Iterate over a copy of keys to allow modification of runCache during iteration
@@ -833,7 +836,7 @@ function tick() {
 
   if (schedules.length === 0 && !hasActivePipeline) {
     // No work — check for pipeline definitions before exiting
-    const pipelinesDir = join(cwd, PIPELINES_DIR);
+    const pipelinesDir = getPipelinesDir();
     const runStateDir = runsDir();
     const hasRuns = existsSync(runStateDir) && readdirSync(runStateDir).some(f => f.endsWith('.json'));
     if (!hasRuns) {

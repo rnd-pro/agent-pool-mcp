@@ -5,18 +5,22 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { getBoardStore } from '../src/tools/board-store.js';
+import { getProjectStatePath, getProjectStateDir, ensureDirFor } from '../src/runtime/paths.js';
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-board-${Date.now()}`);
 
 describe('board store', () => {
   after(() => {
     fs.rmSync(TEST_CWD, { recursive: true, force: true });
+    fs.rmSync(getProjectStateDir(TEST_CWD), { recursive: true, force: true });
   });
 
   it('loads persisted board state before the first snapshot', () => {
-    let dir = path.join(TEST_CWD, '.agent-portal');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'board-state.json'), JSON.stringify({
+    // Board state is project-state (single source: ~/.agent-portal/projects/<key>/), not a per-project
+    // .agent-portal checkout — write where BoardStore reads.
+    let file = getProjectStatePath(TEST_CWD, 'board-state.json');
+    ensureDirFor(file);
+    fs.writeFileSync(file, JSON.stringify({
       nodes: [{ id: 'task-1', status: 'done' }],
       edges: [{ id: 'edge-1', from: 'parent', to: 'task-1' }],
     }));

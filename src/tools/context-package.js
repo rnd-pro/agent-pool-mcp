@@ -149,7 +149,7 @@ export function buildResolvedContextPackage(args = {}, defaultCwd = process.cwd(
     '[Resolved Context Package]',
     'Source: Agent Portal metadata resolver',
     'Mode: orchestration',
-    'Precedence: this package overrides generic bootstrap instructions to broadly scan .agent-portal for this delegated task.',
+    'Precedence: this package overrides generic bootstrap instructions to broadly scan team memory for this delegated task.',
     'Child-agent policy: trust this package first; load only referenced skills/workflows unless the task proves context is missing.',
     'Missing context: call resolve_context or `mcp-agent-portal context resolve` when available; shell inspection is emergency-only and must inspect frontmatter only.',
     `Zones: ${(plan.zones || []).join(', ') || 'none'}`,

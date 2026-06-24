@@ -7,7 +7,7 @@
  */
 
 import fs from 'node:fs';
-import { ensureDirFor, getGlobalConfigPath, getLegacyAgentPortalPath } from '../runtime/paths.js';
+import { ensureDirFor, getGlobalConfigPath } from '../runtime/paths.js';
 
 const GROUPS_FILE = 'resource-groups.json';
 const GROUPS_STATE_FILE = 'resource-group-states.json';
@@ -60,10 +60,6 @@ function getGroupsPath(cwd) {
   return getGlobalConfigPath(GROUPS_FILE);
 }
 
-function getLegacyGroupsPath(cwd) {
-  return getLegacyAgentPortalPath(cwd, 'groups.json');
-}
-
 /**
  * Load all groups from disk.
  *
@@ -72,11 +68,9 @@ function getLegacyGroupsPath(cwd) {
  */
 function loadGroups(cwd) {
   const filePath = getGroupsPath(cwd);
-  const legacyPath = getLegacyGroupsPath(cwd);
-  let sourcePath = fs.existsSync(filePath) ? filePath : legacyPath;
-  if (!fs.existsSync(sourcePath)) return {};
+  if (!fs.existsSync(filePath)) return {};
   try {
-    return JSON.parse(fs.readFileSync(sourcePath, 'utf-8'));
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
   } catch {
     return {};
   }

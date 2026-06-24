@@ -1,5 +1,5 @@
 import { writeFileSync, existsSync, readFileSync } from 'node:fs';
-import { ensureDirFor, getLegacyAgentPortalPath, getProjectStatePath } from '../runtime/paths.js';
+import { ensureDirFor, getProjectStatePath } from '../runtime/paths.js';
 
 const CONTEXT_FILE = 'active_context.json';
 
@@ -11,19 +11,13 @@ function getContextPath(cwd) {
   return getProjectStatePath(cwd, CONTEXT_FILE);
 }
 
-function getLegacyContextPath(cwd) {
-  return getLegacyAgentPortalPath(cwd, CONTEXT_FILE);
-}
-
 function loadCache(cwd) {
   if (cwd !== cwdContext) {
     cwdContext = cwd;
     const filePath = getContextPath(cwd);
-    const legacyPath = getLegacyContextPath(cwd);
-    const sourcePath = existsSync(filePath) ? filePath : legacyPath;
-    if (existsSync(sourcePath)) {
+    if (existsSync(filePath)) {
       try {
-        const files = JSON.parse(readFileSync(sourcePath, 'utf-8'));
+        const files = JSON.parse(readFileSync(filePath, 'utf-8'));
         activeFilesCache = new Set(files);
       } catch {
         activeFilesCache = new Set();
