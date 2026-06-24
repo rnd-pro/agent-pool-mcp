@@ -126,6 +126,10 @@ export function runClaudeStreaming({
         ...process.env,
         TERM: 'dumb',
         CI: '1',
+        // Defense-in-depth: a worker agent must NEVER enforce single-writer ownership of the shared
+        // ~/.agent-portal state (that belongs to the long-lived backend only). Scrub PORTAL_BACKEND so a
+        // worker that touches getStateGraph() cannot claim the token and crash-loop the real backend.
+        PORTAL_BACKEND: undefined,
         AGENT_POOL_DEPTH: String(currentDepth + 1),
         ...(portalUrl ? { PORTAL_MCP_URL: portalUrl } : {}),
         ...(effectiveModel ? { ANTHROPIC_SMALL_FAST_MODEL: effectiveModel } : {}),
