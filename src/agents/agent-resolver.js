@@ -1,8 +1,8 @@
 /**
  * Agent Resolver — lightweight agent entity parser for agent-pool.
  * 
- * Reads `.agent-portal/agents/*.md` files with YAML frontmatter, resolves skill composition
- * from `.agent-portal/skills/`, and returns ready-to-use agent definitions.
+ * Reads `agents/*.md` files with YAML frontmatter from the team-memory content root, resolves skill
+ * composition from team-memory `skills/`, and returns ready-to-use agent definitions.
  * 
  * Zero external dependencies. Mirrors portal's agent-parser.js logic.
  * 
@@ -10,44 +10,20 @@
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, basename, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, basename } from 'node:path';
 import { parseMarkdownFrontmatter } from '../tools/frontmatter.js';
 import { getTeamMemoryRoot } from '../runtime/paths.js';
 
-const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
-
-function getAgentRootCandidates(cwd) {
-  const candidates = [
-    process.env.AGENT_PORTAL_MEMORY_ROOT,
-    process.env.AGENT_PORTAL_AGENTS_ROOT,
-    cwd,
-    process.cwd(),
-    MODULE_ROOT,
-  ].filter(Boolean).map(root => resolve(root));
-  return [...new Set(candidates)];
-}
-
-// Resolve the agents + skills content directories. Prefer the configured
-// team-memory content root (the consolidated single shared clone, flat
-// `agents/` + `skills/` layout); fall back to a legacy per-project
-// `.agent-portal/{agents,skills}` checkout when team memory is unconfigured or
-// does not carry the requested agent.
-function resolveContentDirs(cwd, slug = null) {
+// Resolve the agents + skills content directories from the SINGLE source of truth: the configured
+// team-memory content root (one shared clone, flat `agents/` + `skills/` layout, resolved via the
+// `AGENT_PORTAL_MEMORY_ROOT` env or the `agentPortal.teamMemoryRoot` setting). There is intentionally NO
+// per-project `.agent-portal/{agents,skills}` fallback — team memory is the one place every project
+// reads agents and skills from. When team memory is unconfigured the dirs are null, so callers surface a
+// configure-team-memory state instead of silently reading a stale per-project checkout.
+function resolveContentDirs() {
   const memRoot = getTeamMemoryRoot();
-  if (memRoot) {
-    const agentsDir = join(memRoot, 'agents');
-    const hit = slug ? existsSync(join(agentsDir, `${slug}.md`)) : existsSync(agentsDir);
-    if (hit) return { agentsDir, skillsDir: join(memRoot, 'skills') };
-  }
-  for (const root of getAgentRootCandidates(cwd)) {
-    const agentsDir = join(root, '.agent-portal', 'agents');
-    const hit = slug ? existsSync(join(agentsDir, `${slug}.md`)) : existsSync(agentsDir);
-    if (hit) return { agentsDir, skillsDir: join(root, '.agent-portal', 'skills') };
-  }
-  if (memRoot) return { agentsDir: join(memRoot, 'agents'), skillsDir: join(memRoot, 'skills') };
-  const fallback = resolve(cwd || process.cwd());
-  return { agentsDir: join(fallback, '.agent-portal', 'agents'), skillsDir: join(fallback, '.agent-portal', 'skills') };
+  if (!memRoot) return { agentsDir: null, skillsDir: null };
+  return { agentsDir: join(memRoot, 'agents'), skillsDir: join(memRoot, 'skills') };
 }
 
 // ─── Frontmatter Parser ────────────────────────────────────
@@ -150,11 +126,15 @@ function arrayFromMeta(value) {
 export function resolveAgentMetadata(cwd, slug) {
   if (!slug) return null;
 
-  const { agentsDir } = resolveContentDirs(cwd, slug);
+  const { agentsDir } = resolveContentDirs();
+  if (!agentsDir) {
+    console.error(`[agent-resolver] Team memory not configured; cannot resolve agent '${slug}'.`);
+    return null;
+  }
   const filePath = join(agentsDir, `${slug}.md`);
 
   if (!existsSync(filePath)) {
-    console.error(`[agent-resolver] Agent '${slug}' not found (looked in ${agentsDir}) for cwd=${cwd}`);
+    console.error(`[agent-resolver] Agent '${slug}' not found (looked in ${agentsDir}).`);
     return null;
   }
 
@@ -184,7 +164,7 @@ const _agentCache = new Map();
 const AGENT_CACHE_TTL = 5000;
 
 /**
- * Resolve an agent by slug from `.agent-portal/agents/{slug}.md`.
+ * Resolve an agent by slug from the team-memory `agents/{slug}.md`.
  * Returns the full agent definition with resolved skills prompt.
  * 
  * @param {string} cwd - Project root
@@ -194,7 +174,11 @@ const AGENT_CACHE_TTL = 5000;
 export function resolveAgent(cwd, slug) {
   if (!slug) return null;
 
-  const { agentsDir, skillsDir } = resolveContentDirs(cwd, slug);
+  const { agentsDir, skillsDir } = resolveContentDirs();
+  if (!agentsDir) {
+    console.error(`[agent-resolver] Team memory not configured; cannot resolve agent '${slug}'.`);
+    return null;
+  }
   const cacheKey = `${agentsDir}:${slug}`;
   const cached = _agentCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts < AGENT_CACHE_TTL)) return cached.def;
@@ -202,7 +186,7 @@ export function resolveAgent(cwd, slug) {
   const filePath = join(agentsDir, `${slug}.md`);
 
   if (!existsSync(filePath)) {
-    console.error(`[agent-resolver] Agent '${slug}' not found (looked in ${agentsDir}) for cwd=${cwd}`);
+    console.error(`[agent-resolver] Agent '${slug}' not found (looked in ${agentsDir}).`);
     return null;
   }
 
@@ -241,8 +225,8 @@ export function resolveAgent(cwd, slug) {
  * @returns {string[]}
  */
 export function listAgentSlugs(cwd) {
-  const { agentsDir } = resolveContentDirs(cwd);
-  if (!existsSync(agentsDir)) return [];
+  const { agentsDir } = resolveContentDirs();
+  if (!agentsDir || !existsSync(agentsDir)) return [];
 
   try {
     return readdirSync(agentsDir)

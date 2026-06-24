@@ -697,16 +697,16 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     // Portal-level injection: pre-resolved agent prompt
     agentContext = args.system_prompt;
   } else if (args.agent_slug) {
-    // Resolve agent from .agent-portal/agents/{slug}.md
+    // Resolve agent from the team-memory `agents/{slug}.md` (single source of truth).
     agentDef = resolveAgent(cwd, args.agent_slug);
     if (agentDef) {
       agentContext = agentDef.prompt;
       let groupInfo = agentDef.resourceGroup ? `, group=${agentDef.resourceGroup}` : '';
       console.error(`[agent-pool] Resolved agent '${args.agent_slug}': ${agentDef.skills.length} skills${groupInfo}`);
     } else {
-      console.error(`[agent-pool] Agent '${args.agent_slug}' not found in ${cwd}/.agent-portal/agents/`);
+      console.error(`[agent-pool] Agent '${args.agent_slug}' not found in team-memory agents/`);
       return {
-        content: [{ type: 'text', text: `❌ Agent '${args.agent_slug}' could not be resolved. Check .agent-portal/agents/${args.agent_slug}.md and its skill references.` }],
+        content: [{ type: 'text', text: `❌ Agent '${args.agent_slug}' could not be resolved. Check team-memory \`agents/${args.agent_slug}.md\` (and that team memory is configured) plus its skill references.` }],
         isError: true,
       };
     }

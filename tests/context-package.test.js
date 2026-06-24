@@ -97,7 +97,7 @@ describe('resolved context package', () => {
 
     assert.ok(Array.isArray(result.contexts));
     assert.ok(Array.isArray(result.skills));
-    assert.ok(result.contextPolicy.scanContextMetadataFrom.includes('.agent-portal/workspace/*/context.md'));
+    assert.ok(result.contextPolicy.scanContextMetadataFrom.includes('workspace/*/context.md'));
   });
 
   it('formats compact metadata without markdown bodies and respects max size', () => {

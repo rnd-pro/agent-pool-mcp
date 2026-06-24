@@ -338,7 +338,7 @@ export function resolveContext(args = {}, defaultCwd = process.cwd()) {
       startup: 'metadata-only',
       loadFullSkillWith: 'get_skill_content',
       loadFullWorkflowWith: 'get_workflow_content',
-      scanContextMetadataFrom: '.agent-portal/contexts/**/*.md + .agent-portal/workspace/*/context.md',
+      scanContextMetadataFrom: 'team-memory contexts/**/*.md + workspace/*/context.md',
       atomicItems: 'Use items[] with loadWith/args to enrich one skill, workflow, or file-context at a time.',
     },
     notes: [

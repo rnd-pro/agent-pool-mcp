@@ -120,7 +120,7 @@ context_tags: [review, gateway]
 ---
 Agent body`);
 
-    const meta = resolveAgentMetadata(TEST_CWD, 'reviewer');
+    const meta = withMemoryRoot(path.join(TEST_CWD, '.agent-portal'), () => resolveAgentMetadata(TEST_CWD, 'reviewer'));
 
     assert.equal(meta.slug, 'reviewer');
     assert.equal(meta.role, 'orchestrator');
@@ -155,7 +155,7 @@ Agent body
 
 {{skill:inline-skill}}`);
 
-    const agent = resolveAgent(TEST_CWD, 'qa');
+    const agent = withMemoryRoot(path.join(TEST_CWD, '.agent-portal'), () => resolveAgent(TEST_CWD, 'qa'));
 
     assert.ok(agent);
     assert.deepStrictEqual(agent.skills, ['qa-skill']);
@@ -175,7 +175,7 @@ skills:
 ---
 Agent body`);
 
-    assert.equal(resolveAgent(TEST_CWD, 'broken'), null);
+    assert.equal(withMemoryRoot(path.join(TEST_CWD, '.agent-portal'), () => resolveAgent(TEST_CWD, 'broken')), null);
   });
 
   it('can exclude the current orchestrator from the injected agent catalog', () => {
@@ -195,7 +195,7 @@ description: Implements backend code
 ---
 Backend body`);
 
-    const catalog = buildAgentCatalog(TEST_CWD, { excludeSlug: 'orchestrator' });
+    const catalog = withMemoryRoot(path.join(TEST_CWD, '.agent-portal'), () => buildAgentCatalog(TEST_CWD, { excludeSlug: 'orchestrator' }));
 
     assert.doesNotMatch(catalog, /- \*\*orchestrator\*\*/);
     assert.match(catalog, /backend-engineer/);

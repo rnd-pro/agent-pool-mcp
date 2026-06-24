@@ -113,7 +113,7 @@ export function getToolDefinitions(ctx = {}) {
         policy: { type: 'string', description: 'Policy file for tool restrictions. Use built-in template name (e.g. "read-only", "safe-edit") or absolute path to .yaml policy file.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results. Guides the calling agent on what to do while waiting.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd. Use this to grant access to other project dirs, config dirs, etc.' },
-        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "backend-engineer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md with composed skills. Takes priority over legacy "skill" parameter.' },
+        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "backend-engineer"). Auto-resolves prompt from team-memory agents/{slug}.md with composed skills. Takes priority over legacy "skill" parameter.' },
         resource_group: { type: 'string', description: 'Existing resource group from local portal configuration. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution. Used by portal for portal-level agent injection.' },
         ...DELEGATE_CONTEXT_PROPERTIES,
@@ -149,7 +149,7 @@ export function getToolDefinitions(ctx = {}) {
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
         on_wait_hint: { type: 'string', description: 'Custom coaching message shown when polling for results.' },
         include_dirs: { type: 'array', items: { type: 'string' }, description: 'Additional directories to include in the agent workspace scope. By default the agent only has access to cwd.' },
-        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "code-reviewer"). Auto-resolves prompt from .agent-portal/agents/{slug}.md.' },
+        agent_slug: { type: 'string', description: 'Agent identity slug (e.g. "code-reviewer"). Auto-resolves prompt from team-memory agents/{slug}.md.' },
         resource_group: { type: 'string', description: 'Existing resource group from local portal configuration. Overrides the agent frontmatter resource_group.' },
         system_prompt: { type: 'string', description: 'Pre-resolved system prompt to prepend to the task. Overrides agent_slug resolution.' },
         ...DELEGATE_CONTEXT_PROPERTIES,
@@ -271,7 +271,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'list_skills',
-    description: 'List global CLI skills plus skills from the active .agent-portal/workspace/<project>/skills directory.',
+    description: 'List global CLI skills plus skills from the active team-memory workspace/<project>/skills directory.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -296,7 +296,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'create_skill',
-    description: 'Create or update an active workspace CLI skill under .agent-portal/workspace/<project>/skills/.',
+    description: 'Create or update an active workspace CLI skill under team-memory workspace/<project>/skills/.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -312,7 +312,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'delete_skill',
-    description: 'Delete an active workspace CLI skill by name from .agent-portal/workspace/<project>/skills/.',
+    description: 'Delete an active workspace CLI skill by name from team-memory workspace/<project>/skills/.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -326,7 +326,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'install_skill',
-    description: 'Reserved for future external skill installation. Workspace skills are managed in .agent-portal/workspace/<project>/skills/ or through the Agent Portal UI.',
+    description: 'Reserved for future external skill installation. Workspace skills are managed in team-memory workspace/<project>/skills/ or through the Agent Portal UI.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -656,7 +656,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'save_script',
-    description: 'Save a local automation script to the project database (.agent-portal/scripts/). This is useful for zero-token execution nodes.',
+    description: 'Save a local automation script to the team-memory scripts/ directory. This is useful for zero-token execution nodes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -713,7 +713,7 @@ export function getToolDefinitions(ctx = {}) {
   },
   {
     name: 'list_workflows',
-    description: 'List global workflows plus workflows from the active .agent-portal/workspace/<project>/workflows directory.',
+    description: 'List global workflows plus workflows from the active team-memory workspace/<project>/workflows directory.',
     inputSchema: {
       type: 'object',
       properties: {
