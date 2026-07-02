@@ -3,10 +3,11 @@ import { listSkills } from './skills.js';
 import { getWorkflowDirs, resolveActiveContexts as resolveMemoryContexts } from './memory-layout.js';
 import { buildTagIndexForDirs } from './workflow-index.js';
 import { resolveAgentMetadata } from '../agents/agent-resolver.js';
+import { getTeamMemoryRoot } from '../runtime/paths.js';
 
 const ZONES = {
   ui: {
-    tags: ['ui', 'frontend', 'browser', 'symbiote', 'component', 'design-system'],
+    tags: ['ui', 'frontend', 'browser', 'symbiote', 'component', 'components', 'design-system'],
     paths: [/^web\//, /^src\/client\//, /\.tpl\.js$/, /\.css\.js$/],
     keywords: ['ui', 'frontend', 'browser', 'component', 'symbiote', 'layout', 'screen', 'button', 'селект', 'браузер', 'интерфейс'],
     toolProfile: 'implementation',
@@ -59,6 +60,13 @@ const ZONES = {
       /\.agent-portal\/skills\//,
       /\.agent-portal\/workspace\/[^/]+\/skills\//,
       /\.agent-portal\/workspace\/[^/]+\/context\.md$/,
+      // team-memory/... is a synthetic marker path (see teamMemoryMarkerPaths), not a literal
+      // directory name — it matches focus files under the configured team-memory root regardless
+      // of where that shared clone actually lives on disk or what it is named.
+      /team-memory\/skills\//,
+      /team-memory\/workspace\/[^/]+\/skills\//,
+      /team-memory\/workspace\/[^/]+\/context\.md$/,
+      /team-memory\/contexts\//,
       /context-resolver\.js$/,
       /workflow-index\.js$/,
       /skills\.js$/,
@@ -68,13 +76,20 @@ const ZONES = {
   },
   'workflow-system': {
     tags: ['workflow', 'pipeline', 'process'],
-    paths: [/\.agent-portal\/workflows\//, /\.agent-portal\/workspace\/[^/]+\/workflows\//, /workflow/i, /pipeline/i],
+    paths: [
+      /\.agent-portal\/workflows\//,
+      /\.agent-portal\/workspace\/[^/]+\/workflows\//,
+      /team-memory\/workflows\//,
+      /team-memory\/workspace\/[^/]+\/workflows\//,
+      /workflow/i,
+      /pipeline/i,
+    ],
     keywords: ['workflow', 'pipeline', 'flow', 'process', 'воркфлоу', 'пайплайн'],
     toolProfile: 'workflow',
   },
   config: {
     tags: ['config', 'settings'],
-    paths: [/\.agent-portal\/agents\//, /config/i, /\.json$/, /\.ya?ml$/, /\.toml$/],
+    paths: [/\.agent-portal\/agents\//, /team-memory\/agents\//, /config/i, /\.json$/, /\.ya?ml$/, /\.toml$/],
     keywords: ['config', 'settings', 'agent metadata', 'agent role', 'настрой', 'конфиг', 'метаданные агента'],
     toolProfile: 'review',
   },
@@ -99,6 +114,23 @@ function normalizeText(value) {
 function relPath(cwd, file) {
   if (!file) return '';
   return path.isAbsolute(file) ? path.relative(cwd, file) : file;
+}
+
+/**
+ * Synthetic `team-memory/<relative>` marker path for a focus file that resolves under the
+ * configured team-memory root, regardless of where that shared clone actually lives on disk or
+ * what it is named. Returns null when team-memory is unconfigured or the file falls outside it.
+ * @param {string} file
+ * @returns {string|null}
+ */
+function teamMemoryMarkerPath(file) {
+  if (!file) return null;
+  let root = getTeamMemoryRoot();
+  if (!root) return null;
+  let abs = path.isAbsolute(file) ? file : path.resolve(file);
+  let rel = path.relative(root, abs);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return `team-memory/${rel.replaceAll(path.sep, '/')}`;
 }
 
 function skillNameFromRef(ref) {
@@ -141,7 +173,11 @@ function scoreZone(zone, prompt, files) {
 
 function inferZones({ cwd = process.cwd(), prompt = '', files = [], agent = null }) {
   let lowerPrompt = normalizeText(prompt);
-  let normalizedFiles = files.map(file => relPath(cwd, file).replaceAll(path.sep, '/'));
+  let normalizedFiles = files.flatMap(file => {
+    let rel = relPath(cwd, file).replaceAll(path.sep, '/');
+    let marker = teamMemoryMarkerPath(file);
+    return marker ? [rel, marker] : [rel];
+  });
   let scored = Object.entries(ZONES)
     .map(([name, zone]) => ({ name, score: scoreZone(zone, lowerPrompt, normalizedFiles) }))
     .filter(item => item.score > 0)
@@ -280,6 +316,7 @@ function buildContextItems({ cwd, skills, workflows, files }) {
     let rel = relPath(cwd, file).replaceAll(path.sep, '/');
     if (!rel) continue;
     if (rel.startsWith('.agent-portal/agents/')) continue;
+    if (teamMemoryMarkerPath(file)?.startsWith('team-memory/agents/')) continue;
     items.push({
       id: `file-context:${rel}`,
       type: 'file-context',
