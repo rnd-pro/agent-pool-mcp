@@ -2,7 +2,7 @@
  * Agent Resolver — lightweight agent entity parser for agent-pool.
  * 
  * Reads `agents/*.md` files with YAML frontmatter from the team-memory content root, resolves skill
- * composition from team-memory `skills/`, and returns ready-to-use agent definitions.
+ * composition from the configured global skills root, and returns ready-to-use agent definitions.
  * 
  * Zero external dependencies. Mirrors portal's agent-parser.js logic.
  * 
@@ -12,18 +12,16 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { parseMarkdownFrontmatter } from '../tools/frontmatter.js';
-import { getTeamMemoryRoot } from '../runtime/paths.js';
+import { getSkillsRoot, getTeamMemoryRoot } from '../runtime/paths.js';
 
-// Resolve the agents + skills content directories from the SINGLE source of truth: the configured
-// team-memory content root (one shared clone, flat `agents/` + `skills/` layout, resolved via the
-// `AGENT_PORTAL_MEMORY_ROOT` env or the `agentPortal.teamMemoryRoot` setting). There is intentionally NO
-// per-project `.agent-portal/{agents,skills}` fallback — team memory is the one place every project
-// reads agents and skills from. When team memory is unconfigured the dirs are null, so callers surface a
-// configure-team-memory state instead of silently reading a stale per-project checkout.
+// Resolve the agents + skills content directories from configured roots. Agents still live under the
+// team-memory content root; global skills can be pointed at a dedicated skills root through config.
+// There is intentionally NO per-project `.agent-portal/{agents,skills}` fallback.
 function resolveContentDirs() {
   const memRoot = getTeamMemoryRoot();
+  const skillsRoot = getSkillsRoot();
   if (!memRoot) return { agentsDir: null, skillsDir: null };
-  return { agentsDir: join(memRoot, 'agents'), skillsDir: join(memRoot, 'skills') };
+  return { agentsDir: join(memRoot, 'agents'), skillsDir: skillsRoot };
 }
 
 // ─── Frontmatter Parser ────────────────────────────────────

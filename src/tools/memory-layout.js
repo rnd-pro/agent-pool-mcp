@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { parseFrontmatter } from './markdown-parser.js';
-import { getTeamMemoryRoot, getTeamMemoryPath } from '../runtime/paths.js';
+import { getSkillsRoot, getTeamMemoryRoot, getTeamMemoryPath } from '../runtime/paths.js';
 
 function toPosix(value) {
   return String(value || '').replaceAll(path.sep, '/').replace(/^\.?\//, '');
@@ -120,8 +120,7 @@ function contextFromFile(filePath) {
 }
 
 export function getGlobalSkillsDir() {
-  let root = getTeamMemoryRoot();
-  return root ? path.join(root, 'skills') : null;
+  return getSkillsRoot();
 }
 
 export function getGlobalWorkflowsDir() {
@@ -153,9 +152,12 @@ export function activeWorkspaceNames(cwd, files = []) {
 }
 
 export function getSkillDirs(cwd, files = []) {
+  let dirs = [];
+  let globalSkillsDir = getGlobalSkillsDir();
+  if (globalSkillsDir) dirs.push({ dir: globalSkillsDir, tier: 'global', workspace: null });
+
   let root = getTeamMemoryRoot();
-  if (!root) return [];
-  let dirs = [{ dir: getGlobalSkillsDir(), tier: 'global', workspace: null }];
+  if (!root) return dirs;
   for (let workspace of activeWorkspaceNames(cwd, files)) {
     dirs.push({
       dir: path.join(root, 'workspace', workspace, 'skills'),

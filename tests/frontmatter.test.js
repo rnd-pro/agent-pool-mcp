@@ -22,6 +22,25 @@ function withMemoryRoot(root, fn) {
   }
 }
 
+function withPortalConfig(configPath, fn) {
+  const previousMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+  const previousSkillsRoot = process.env.AGENT_PORTAL_SKILLS_ROOT;
+  const previousConfigPath = process.env.PORTAL_CONFIG_PATH;
+  delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+  delete process.env.AGENT_PORTAL_SKILLS_ROOT;
+  process.env.PORTAL_CONFIG_PATH = configPath;
+  try {
+    return fn();
+  } finally {
+    if (previousMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+    else process.env.AGENT_PORTAL_MEMORY_ROOT = previousMemoryRoot;
+    if (previousSkillsRoot === undefined) delete process.env.AGENT_PORTAL_SKILLS_ROOT;
+    else process.env.AGENT_PORTAL_SKILLS_ROOT = previousSkillsRoot;
+    if (previousConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
+    else process.env.PORTAL_CONFIG_PATH = previousConfigPath;
+  }
+}
+
 describe('shared frontmatter parser', () => {
   after(() => {
     fs.rmSync(TEST_CWD, { recursive: true, force: true });
@@ -163,6 +182,39 @@ Agent body
     assert.match(agent.prompt, /Agent body/);
     assert.match(agent.prompt, /Inline guidance content/);
     assert.ok(agent.prompt.indexOf('Required QA skill content') < agent.prompt.indexOf('Agent body'));
+  });
+
+  it('composes agent prompts from configured skills root', () => {
+    const memoryRoot = path.join(TEST_CWD, 'configured-memory');
+    const agentsDir = path.join(memoryRoot, 'agents');
+    const skillsRoot = path.join(TEST_CWD, 'configured-skills');
+    const configPath = path.join(TEST_CWD, 'configured-agent-portal.json');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.mkdirSync(path.join(skillsRoot, 'agents'), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      agentPortal: {
+        teamMemoryRoot: memoryRoot,
+        skillsRoot,
+      },
+    }));
+    fs.writeFileSync(path.join(skillsRoot, 'agents', 'configured-skill.md'), `---
+name: configured-skill
+description: Configured skill contract
+---
+Configured skill content.`);
+    fs.writeFileSync(path.join(agentsDir, 'configured.md'), `---
+name: configured
+skills:
+  - configured-skill
+---
+Agent body`);
+
+    const agent = withPortalConfig(configPath, () => resolveAgent(TEST_CWD, 'configured'));
+
+    assert.ok(agent);
+    assert.deepStrictEqual(agent.skills, ['configured-skill']);
+    assert.match(agent.prompt, /Configured skill content/);
+    assert.match(agent.prompt, /Agent body/);
   });
 
   it('does not resolve agents with missing required skills', () => {

@@ -35,6 +35,25 @@ export function getTeamMemoryRoot(env = process.env) {
 }
 
 /**
+ * Resolve the shared global skills directory.
+ *
+ * Global skills can be split from the team-memory content root when the Portal
+ * config points agentPool at a dedicated skills checkout. The default remains
+ * `<teamMemoryRoot>/skills` so existing team-memory layouts keep working.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string|null}
+ */
+export function getSkillsRoot(env = process.env) {
+  if (env.AGENT_PORTAL_SKILLS_ROOT) return path.resolve(env.AGENT_PORTAL_SKILLS_ROOT);
+  if (env.AGENT_PORTAL_MEMORY_ROOT) return path.join(path.resolve(env.AGENT_PORTAL_MEMORY_ROOT), 'skills');
+  let config = readPortalConfig(env)?.agentPortal || {};
+  if (config.skillsRoot) return path.resolve(config.skillsRoot);
+  let teamMemoryRoot = getTeamMemoryRoot(env);
+  return teamMemoryRoot ? path.join(teamMemoryRoot, 'skills') : null;
+}
+
+/**
  * Join parts onto the team-memory root, or null when unconfigured.
  * @param {...string} parts
  * @returns {string|null}
