@@ -2,6 +2,7 @@
 
 ```
 index.js                    ← Entry point (stdio transport)
+bench/                      ← Shturman Phase-0 benchmark harness
 policies/                   ← Tool restriction policies (YAML)
 ├── read-only.yaml
 └── safe-edit.yaml
@@ -29,6 +30,12 @@ src/
     ├── pipeline.js         ← Pipeline CRUD, run state, signals, bounce-back
     └── scheduler.js        ← Schedule management + daemon spawning
 ```
+
+### Bench Harness
+
+`bench/` contains the Shturman Phase-0 experiment runner. It is standalone from MCP tool routing:
+OpenRouter requests are made directly from the CLI, unit tests use a mock transport, and raw run output
+defaults to `~/.agent-portal/bench/shturman/`.
 
 ### Process Management
 - **Detached Spawn**: Workers are spawned in their own process groups.

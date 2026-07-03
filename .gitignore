@@ -2,5 +2,7 @@ node_modules/
 package-lock.json
 .project-graph-cache.json
 .DS_Store
+.agent-portal/
 .agent/
 .agents/
+tmp/

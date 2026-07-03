@@ -1,0 +1,32 @@
+{
+  "appTitle": "agent-pool-mcp shturman smoke",
+  "repetitions": 1,
+  "arms": [
+    {
+      "id": "cheap-solo",
+      "mode": "solo",
+      "model": "openrouter/auto",
+      "allowFallbacks": false,
+      "dataCollection": "deny",
+      "temperature": 0
+    },
+    {
+      "id": "cheap-chain",
+      "mode": "chain",
+      "model": "openrouter/auto",
+      "allowFallbacks": false,
+      "dataCollection": "deny",
+      "temperature": 0,
+      "maxIterations": 3
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text-contract-smoke",
+      "prompt": "Return exactly this marker in a short sentence: SHTURMAN_OK",
+      "checks": [
+        { "type": "includes", "value": "SHTURMAN_OK" }
+      ]
+    }
+  ]
+}

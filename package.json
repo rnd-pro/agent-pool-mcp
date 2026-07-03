@@ -10,6 +10,7 @@
   "files": [
     "index.js",
     "context.js",
+    "bench/",
     "src/",
     "policies/",
     "skills/",
@@ -17,6 +18,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "bench:shturman": "node bench/cli.js",
     "start": "node index.js",
     "test": "node --import ./tests/_ledger-setup.js --test --test-concurrency=1 tests/*.test.js"
   },

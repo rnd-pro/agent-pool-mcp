@@ -159,6 +159,16 @@ npx agent-pool-mcp --version    # Show version
 npx agent-pool-mcp --help       # Full help
 ```
 
+### Shturman Benchmark
+
+The experimental Phase-0 Shturman benchmark runs solo and chain-guided arms against OpenRouter with
+mechanical checks. It reads `OPENROUTER_API_KEY` from the environment and writes raw runs outside the
+repo by default:
+
+```bash
+npm run bench:shturman -- --config bench/examples/shturman-smoke.config.json
+```
+
 ## Remote Workers (SSH)
 
 Run workers on remote servers via SSH — same interface, transparent stdio forwarding. Create `agent-pool.config.json` in your project root or `~/.config/agent-pool/config.json`:
