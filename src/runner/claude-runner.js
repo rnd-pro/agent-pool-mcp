@@ -29,6 +29,16 @@ function normalizeClaudeReasoningEffort(value) {
   return CLAUDE_REASONING_EFFORTS.has(normalized) ? normalized : null;
 }
 
+function normalizeAllowedTools(value) {
+  if (Array.isArray(value)) {
+    return value.map((tool) => typeof tool === 'string' ? tool.trim() : '').filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.split(',').map((tool) => tool.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 function normalizeClaudeEvent(ev) {
   if (ev.type === 'assistant' && ev.message?.content) {
     let normalized = [];
@@ -75,6 +85,7 @@ export function runClaudeStreaming({
   sessionId,
   taskId,
   includeDirs,
+  allowedTools,
   chat_id,
   taskSecret,
 }) {
@@ -93,6 +104,8 @@ export function runClaudeStreaming({
     }
 
     let args = ['-p', finalPrompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode(approvalMode)];
+    let effectiveAllowedTools = normalizeAllowedTools(allowedTools);
+    if (effectiveAllowedTools.length > 0) args.push('--allowedTools', ...effectiveAllowedTools);
 
     let effectiveModel = model && model !== 'default' ? model : null;
     if (effectiveModel) args.push('--model', effectiveModel);

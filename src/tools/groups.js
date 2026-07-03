@@ -88,6 +88,18 @@ function saveGroups(cwd, groups) {
   fs.writeFileSync(filePath, JSON.stringify(groups, null, 2));
 }
 
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
+    return items.length > 0 ? items : null;
+  }
+  if (typeof value === 'string') {
+    const items = value.split(',').map((item) => item.trim()).filter(Boolean);
+    return items.length > 0 ? items : null;
+  }
+  return null;
+}
+
 /**
  * Create or update a group.
  *
@@ -104,6 +116,7 @@ function saveGroups(cwd, groups) {
  * @param {number} [config.max_agents] - Max concurrent agents in this group
  * @param {number} [config.timeout] - Default timeout in seconds for agents in this group
  * @param {string[]} [config.include_dirs] - Additional directories agents can access
+ * @param {string[]} [config.allowed_tools] - Provider tool allowlist passed to compatible runners
  * @param {string} [config.model_tier] - Logical model tier ('basic', 'advanced')
  * @param {string} [config.rotation_mode] - Rotation strategy ('error_fallback' or 'round_robin')
  * @returns {{ name: string, created: boolean }}
@@ -123,6 +136,7 @@ export function createGroup(cwd, config) {
     max_agents: config.max_agents ?? null,
     timeout: config.timeout ?? null,
     include_dirs: config.include_dirs || null,
+    allowed_tools: normalizeStringList(config.allowed_tools || config.allowedTools),
     model_tier: config.model_tier || null,
     rotation_mode: config.rotation_mode || 'error_fallback',
     created_at: existed ? groups[config.name].created_at : new Date().toISOString(),

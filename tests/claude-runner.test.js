@@ -137,6 +137,26 @@ for (const event of events) console.log(JSON.stringify(event));
     assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
   });
 
+  it('passes allowed tool patterns to Claude Code', async () => {
+    let argsFile = path.join(tmpDir, 'args-allowed-tools.json');
+    process.env.CLAUDE_RUNNER_ARGS_FILE = argsFile;
+
+    let { runClaudeStreaming } = await import('../src/runner/claude-runner.js');
+    await runClaudeStreaming({
+      prompt: 'hello',
+      cwd: tmpDir,
+      approvalMode: 'auto_edit',
+      allowedTools: ['Bash(node --check *)', 'Bash(node --test *)'],
+      timeout: 5,
+    });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    let index = args.indexOf('--allowedTools');
+    assert.notEqual(index, -1);
+    assert.deepEqual(args.slice(index + 1, index + 3), ['Bash(node --check *)', 'Bash(node --test *)']);
+    assert.equal(args[args.indexOf('--permission-mode') + 1], 'acceptEdits');
+  });
+
   it('does not pass the UI default sentinel as a real model', async () => {
     let argsFile = path.join(tmpDir, 'args-default.json');
     process.env.CLAUDE_RUNNER_ARGS_FILE = argsFile;

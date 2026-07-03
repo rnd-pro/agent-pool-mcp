@@ -379,6 +379,26 @@ function profileOption(profile, camelName, snakeName) {
   return profile?.[camelName] ?? profile?.[snakeName] ?? profile?.profile?.[camelName] ?? profile?.profile?.[snakeName] ?? null;
 }
 
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => typeof item === 'string' ? item.trim() : '').filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function mergeStringLists(...values) {
+  let merged = [];
+  for (let value of values) {
+    for (let item of normalizeStringList(value)) {
+      if (!merged.includes(item)) merged.push(item);
+    }
+  }
+  return merged;
+}
+
 function resolveRunProfile(profile, resourceGroup, agentDef) {
   let provider = profile?.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
   let reasoningEffort = normalizeReasoningEffort(
@@ -393,6 +413,13 @@ function resolveRunProfile(profile, resourceGroup, agentDef) {
     provider,
     model: profile?.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0] ?? null,
     reasoningEffort,
+    allowedTools: mergeStringLists(
+      profileOption(profile, 'allowedTools', 'allowed_tools'),
+      resourceGroup?.allowedTools,
+      resourceGroup?.allowed_tools,
+      agentDef?.allowedTools,
+      agentDef?.allowed_tools
+    ),
     label: profile?.label || null,
   };
 }
@@ -903,6 +930,7 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     runner: args.runner,
     policy: policyPath,
     includeDirs: args.include_dirs,
+    allowedTools: mergeStringLists(args.allowedTools, args.allowed_tools, resourceGroup?.allowedTools, resourceGroup?.allowed_tools),
     groupConfig: args.groupConfig || (resourceGroup ? { name: resourceGroupName, ...resourceGroup } : undefined),
     skill: args.skill,
     chat_id: args.chat_id,
@@ -983,6 +1011,7 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
           ...taskOpts,
           model: profile.model,
           reasoningEffort: profile.reasoningEffort,
+          allowedTools: mergeStringLists(args.allowedTools, args.allowed_tools, profile.allowedTools, taskOpts.allowedTools),
           sessionId: index > 0 && profile.provider !== provider ? undefined : taskOpts.sessionId,
         };
         try {
@@ -1598,6 +1627,7 @@ function handleCreateGroup(args) {
     max_agents: args.max_agents,
     timeout: args.timeout,
     include_dirs: args.include_dirs,
+    allowed_tools: args.allowed_tools || args.allowedTools,
     rotation_mode: args.rotation_mode,
     model_tier: args.model_tier,
   });
@@ -1738,6 +1768,7 @@ async function handleDelegateToGroup(args) {
       skill: group.skill || undefined,
       policy: group.policy || undefined,
       include_dirs: args.include_dirs || group.include_dirs || undefined,
+      allowed_tools: args.allowed_tools || args.allowedTools || group.allowed_tools || group.allowedTools || undefined,
       timeout: args.timeout ?? group.timeout ?? undefined,
       groupConfig: { name: args.group, ...group },
       resource_group: args.group,

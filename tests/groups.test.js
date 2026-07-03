@@ -75,6 +75,7 @@ describe('groups.js', () => {
       ],
       approval_mode: 'auto_edit',
       timeout: 450,
+      allowed_tools: ['Bash(node --check *)'],
     });
 
     assert.strictEqual(res.name, 'test-group');
@@ -90,6 +91,7 @@ describe('groups.js', () => {
     assert.equal('fallback_profiles' in group, false);
     assert.strictEqual(group.approval_mode, 'auto_edit');
     assert.strictEqual(group.timeout, 450);
+    assert.deepStrictEqual(group.allowed_tools, ['Bash(node --check *)']);
   });
 
   it('getGroupNextProfile with error_fallback always returns the first ordered profile', () => {
