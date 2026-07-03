@@ -63,14 +63,14 @@ test('config agentPortal.skillsRoot is used when env is unset', () => {
   }
 });
 
-test('AGENT_PORTAL_MEMORY_ROOT env owns default skills root over config skillsRoot', () => {
+test('config agentPortal.skillsRoot is used when memory root env is set', () => {
   let dir = mkdtempSync(path.join(tmpdir(), 'skills-env-memory-'));
   let cfg = path.join(dir, 'agent-portal.json');
   writeFileSync(cfg, JSON.stringify({ agentPortal: { skillsRoot: '/srv/config-skills' } }));
   try {
     assert.equal(
       getSkillsRoot({ PORTAL_CONFIG_PATH: cfg, AGENT_PORTAL_MEMORY_ROOT: '/srv/env-team-memory' }),
-      path.resolve('/srv/env-team-memory/skills'),
+      path.resolve('/srv/config-skills'),
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

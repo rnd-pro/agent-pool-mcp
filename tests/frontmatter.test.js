@@ -12,13 +12,17 @@ import { buildAgentCatalog, resolveAgent, resolveAgentMetadata } from '../src/ag
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-frontmatter-${Date.now()}`);
 
 function withMemoryRoot(root, fn) {
-  const previous = process.env.AGENT_PORTAL_MEMORY_ROOT;
+  const previousMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+  const previousSkillsRoot = process.env.AGENT_PORTAL_SKILLS_ROOT;
   process.env.AGENT_PORTAL_MEMORY_ROOT = root;
+  process.env.AGENT_PORTAL_SKILLS_ROOT = path.join(root, 'skills');
   try {
     return fn();
   } finally {
-    if (previous === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
-    else process.env.AGENT_PORTAL_MEMORY_ROOT = previous;
+    if (previousMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+    else process.env.AGENT_PORTAL_MEMORY_ROOT = previousMemoryRoot;
+    if (previousSkillsRoot === undefined) delete process.env.AGENT_PORTAL_SKILLS_ROOT;
+    else process.env.AGENT_PORTAL_SKILLS_ROOT = previousSkillsRoot;
   }
 }
 

@@ -46,7 +46,6 @@ export function getTeamMemoryRoot(env = process.env) {
  */
 export function getSkillsRoot(env = process.env) {
   if (env.AGENT_PORTAL_SKILLS_ROOT) return path.resolve(env.AGENT_PORTAL_SKILLS_ROOT);
-  if (env.AGENT_PORTAL_MEMORY_ROOT) return path.join(path.resolve(env.AGENT_PORTAL_MEMORY_ROOT), 'skills');
   let config = readPortalConfig(env)?.agentPortal || {};
   if (config.skillsRoot) return path.resolve(config.skillsRoot);
   let teamMemoryRoot = getTeamMemoryRoot(env);
