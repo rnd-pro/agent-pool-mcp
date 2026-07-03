@@ -205,7 +205,7 @@ function matchSkills(cwd, tags, limit, contextSkillNames = [], files = []) {
     .map(skill => {
       let skillTags = skill.tags?.length ? skill.tags : [skill.category];
       let score = skillTags.reduce((sum, tag) => sum + (tagSet.has(normalizeText(tag)) ? 1 : 0), 0);
-      if (contextSkillSet.has(skill.name)) score += score > 0 ? 5 : 1;
+      if (contextSkillSet.has(skill.name)) score += 100;
       return { skill, score };
     })
     .filter(item => item.score > 0 || item.skill.autoload === true)

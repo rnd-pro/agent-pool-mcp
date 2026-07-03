@@ -10,11 +10,13 @@ import { handleGetWorkflowContent } from '../src/tools/workflow-tools.js';
 
 let tempDirs = [];
 let savedMemoryRoot;
+let savedSkillsRoot;
 
 function makeProject() {
   let cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-context-package-'));
   tempDirs.push(cwd);
   process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(cwd, '.agent-portal');
+  process.env.AGENT_PORTAL_SKILLS_ROOT = path.join(cwd, '.agent-portal', 'skills');
   fs.writeFileSync(path.join(cwd, 'package.json'), '{}');
 
   let portal = path.join(cwd, '.agent-portal');
@@ -83,12 +85,15 @@ DEMO WORKFLOW BODY`);
 describe('resolved context package', () => {
   beforeEach(() => {
     savedMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+    savedSkillsRoot = process.env.AGENT_PORTAL_SKILLS_ROOT;
   });
 
   afterEach(() => {
     for (let dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
     if (savedMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
     else process.env.AGENT_PORTAL_MEMORY_ROOT = savedMemoryRoot;
+    if (savedSkillsRoot === undefined) delete process.env.AGENT_PORTAL_SKILLS_ROOT;
+    else process.env.AGENT_PORTAL_SKILLS_ROOT = savedSkillsRoot;
   });
 
   it('exports the same resolver shape through the package-level API', () => {

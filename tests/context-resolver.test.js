@@ -6,6 +6,7 @@ import path from 'node:path';
 
 let tempDirs = [];
 let savedMemoryRoot;
+let savedSkillsRoot;
 
 function writeFixtureFile(cwd, relativePath, content) {
   let filePath = path.join(cwd, relativePath);
@@ -17,6 +18,7 @@ function makeProject() {
   let cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-context-resolver-'));
   tempDirs.push(cwd);
   process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(cwd, '.agent-portal');
+  process.env.AGENT_PORTAL_SKILLS_ROOT = path.join(cwd, '.agent-portal', 'skills');
   fs.writeFileSync(path.join(cwd, 'package.json'), '{}');
 
   writeFixtureFile(cwd, '.agent-portal/agents/ui-engineer.md', `---
@@ -142,12 +144,15 @@ tags: [context, workflow, tooling, server]
 describe('context resolver', () => {
   beforeEach(() => {
     savedMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+    savedSkillsRoot = process.env.AGENT_PORTAL_SKILLS_ROOT;
   });
 
   afterEach(() => {
     for (let dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
     if (savedMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
     else process.env.AGENT_PORTAL_MEMORY_ROOT = savedMemoryRoot;
+    if (savedSkillsRoot === undefined) delete process.env.AGENT_PORTAL_SKILLS_ROOT;
+    else process.env.AGENT_PORTAL_SKILLS_ROOT = savedSkillsRoot;
   });
 
   it('classifies UI tasks without escalating to orchestrator profile', async () => {
