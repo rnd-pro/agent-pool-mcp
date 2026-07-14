@@ -55,7 +55,7 @@ Create named agent groups with shared config. Groups are reusable presets — de
 
 **Example:**
 ```
-create_group({ name: "backend-team", profiles: [{ provider: "codex", model: "default" }], runner: "remote", skill: "node-dev", policy: "safe-edit", max_agents: 3 })
+create_group({ name: "backend-team", profiles: [{ provider: "codex", model: "default", reasoningEffort: "high", serviceTier: "priority" }], runner: "remote", skill: "node-dev", policy: "safe-edit", max_agents: 3 })
 create_group({ name: "qa-team", policy: "read-only", skill: "test-writer" })
 
 // Spawn 2 agents from backend-team
@@ -67,6 +67,9 @@ list_groups()
 ```
 
 Groups persist to `.agent-portal/groups.json` and survive IDE restarts.
+Codex profiles, direct delegations, schedules, and pipeline steps accept
+`reasoningEffort` and `serviceTier`. Values are forwarded to the installed Codex
+CLI, which remains the authority for model-specific validity.
 
 ## Messaging
 Send structured data between agents or pipeline steps using `send_message` and `get_messages`. Messages are persisted as JSONL files in `.agent-portal/messages/`.

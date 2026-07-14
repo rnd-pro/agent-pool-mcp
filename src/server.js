@@ -62,6 +62,12 @@ function preview(value, limit) {
   return typeof value === 'string' ? value.substring(0, limit) : '';
 }
 
+function diagnosticLine(value, limit = 500) {
+  return typeof value === 'string'
+    ? value.replace(/\s+/g, ' ').trim().replaceAll('`', '\\`').substring(0, limit)
+    : '';
+}
+
 function normalizeFileHints(files) {
   if (!Array.isArray(files)) return [];
   return [...new Set(files.map(file => String(file || '').trim()).filter(Boolean))];
@@ -346,16 +352,43 @@ function resultFailureReason(result) {
 }
 
 const PROVIDER_REASONING_EFFORTS = {
-  codex: new Set(['low', 'medium', 'high', 'xhigh']),
   claude: new Set(['low', 'medium', 'high', 'xhigh', 'max']),
 };
 const APPROVAL_MODES = new Set(['yolo', 'auto_edit', 'plan']);
 
 function normalizeReasoningEffort(value, provider = 'codex') {
+  if (value !== undefined && value !== null) {
+    if (typeof value !== 'string') {
+      throw new Error('Invalid reasoningEffort: must be a string');
+    }
+    if (value.trim() === '') {
+      throw new Error('Invalid reasoningEffort: must be a non-empty string');
+    }
+  }
   let normalized = typeof value === 'string' ? value.trim() : '';
   if (!normalized || normalized === 'default') return null;
+  if (provider === 'codex') return normalized;
   let supported = PROVIDER_REASONING_EFFORTS[provider] || null;
-  return supported?.has(normalized) ? normalized : null;
+  if (provider === 'claude' && !supported?.has(normalized)) {
+    throw new Error(`Invalid reasoningEffort for Claude: ${normalized}`);
+  }
+  if (provider === 'claude') return normalized;
+  throw new Error(`reasoningEffort is only supported by Codex and Claude, not ${provider}`);
+}
+
+function normalizeServiceTier(value, provider = 'codex') {
+  if (value !== undefined && value !== null) {
+    if (typeof value !== 'string') {
+      throw new Error('Invalid serviceTier: must be a string');
+    }
+    if (value.trim() === '') {
+      throw new Error('Invalid serviceTier: must be a non-empty string');
+    }
+  }
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized === 'default') return null;
+  if (provider === 'codex') return normalized;
+  throw new Error(`serviceTier is only supported by Codex, not ${provider}`);
 }
 
 function normalizeApprovalMode(value) {
@@ -409,10 +442,19 @@ function resolveRunProfile(profile, resourceGroup, agentDef) {
     ?? agentDef?.reasoning_effort,
     provider
   );
+  let serviceTier = normalizeServiceTier(
+    profileOption(profile, 'serviceTier', 'service_tier')
+    ?? resourceGroup?.serviceTier
+    ?? resourceGroup?.service_tier
+    ?? agentDef?.serviceTier
+    ?? agentDef?.service_tier,
+    provider
+  );
   return {
     provider,
     model: profile?.model ?? resourceGroup?.model ?? agentDef?.model ?? agentDef?.models?.[0] ?? null,
     reasoningEffort,
+    serviceTier,
     allowedTools: mergeStringLists(
       profileOption(profile, 'allowedTools', 'allowed_tools'),
       resourceGroup?.allowedTools,
@@ -430,17 +472,28 @@ function buildRuntimeFallbackProfiles(args, resourceGroup, resourceProfile) {
     : [];
   let rotationMode = resourceGroup?.rotation_mode || 'error_fallback';
   let usesExplicitTarget = Boolean(args.provider || args.model);
+  let reasoningOverride = args.reasoningEffort ?? args.reasoning_effort;
+  let serviceTierOverride = args.serviceTier ?? args.service_tier;
 
-  if (!usesExplicitTarget && rotationMode === 'error_fallback' && profiles.length > 1) {
-    return profiles;
+  function applyOverrides(profile) {
+    return {
+      ...profile,
+      reasoningEffort: reasoningOverride ?? profile?.reasoningEffort ?? profile?.reasoning_effort,
+      serviceTier: serviceTierOverride ?? profile?.serviceTier ?? profile?.service_tier,
+    };
   }
 
-  return [{
+  if (!usesExplicitTarget && rotationMode === 'error_fallback' && profiles.length > 1) {
+    return profiles.map(applyOverrides);
+  }
+
+  return [applyOverrides({
     provider: args.provider || resourceProfile.provider || resourceGroup?.provider || null,
     model: args.model ?? resourceProfile.model ?? resourceGroup?.model ?? null,
-    reasoningEffort: args.reasoningEffort ?? args.reasoning_effort ?? resourceProfile.profile?.reasoningEffort ?? resourceProfile.profile?.reasoning_effort ?? null,
+    reasoningEffort: resourceProfile.profile?.reasoningEffort ?? resourceProfile.profile?.reasoning_effort ?? null,
+    serviceTier: resourceProfile.profile?.serviceTier ?? resourceProfile.profile?.service_tier ?? null,
     profile: resourceProfile.profile || null,
-  }];
+  })];
 }
 
 
@@ -923,6 +976,13 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
       ?? resourceProfile.profile?.reasoning_effort,
       provider
     ),
+    serviceTier: normalizeServiceTier(
+      args.serviceTier
+      ?? args.service_tier
+      ?? resourceProfile.profile?.serviceTier
+      ?? resourceProfile.profile?.service_tier,
+      provider
+    ),
     approvalMode: resolvedMode,
     timeout,
     sessionId: args.session_id,
@@ -987,6 +1047,7 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
       provider,
       model: taskOpts.model ?? null,
       reasoningEffort: taskOpts.reasoningEffort ?? null,
+      serviceTier: taskOpts.serviceTier ?? null,
       runner: args.runner ?? null,
       skill: args.skill ?? null,
       contextMode,
@@ -1011,6 +1072,7 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
           ...taskOpts,
           model: profile.model,
           reasoningEffort: profile.reasoningEffort,
+          serviceTier: profile.serviceTier,
           allowedTools: mergeStringLists(args.allowedTools, args.allowed_tools, profile.allowedTools, taskOpts.allowedTools),
           sessionId: index > 0 && profile.provider !== provider ? undefined : taskOpts.sessionId,
         };
@@ -1198,11 +1260,14 @@ function handleScheduleTask(args = {}) {
 
   const cwd = args.cwd ?? defaultCwd;
   try {
+    let provider = args.provider || DEFAULT_PROVIDER;
     const result = addSchedule(cwd, {
       prompt: args.prompt,
       cron: args.cron,
-      provider: args.provider || DEFAULT_PROVIDER,
+      provider,
       model: args.model,
+      reasoningEffort: normalizeReasoningEffort(args.reasoningEffort ?? args.reasoning_effort, provider),
+      serviceTier: normalizeServiceTier(args.serviceTier ?? args.service_tier, provider),
       skill: args.skill,
       approvalMode: args.approval_mode,
       catchup: args.catchup,
@@ -1274,9 +1339,10 @@ function handleGetScheduledResults(args) {
     return { content: [{ type: 'text', text: 'No scheduled results yet.' }] };
   }
 
-  const lines = results.map((r) =>
-    `### ${r.scheduleId} — ${r.executedAt}\n- Exit: ${r.exitCode}\n- Events: ${r.totalEvents}\n\n\`\`\`\n${(r.response || '').substring(0, 500)}\n\`\`\``,
-  );
+  const lines = results.map((r) => {
+    let error = diagnosticLine(r.error);
+    return `### ${r.scheduleId} — ${r.executedAt}\n- Exit: ${r.exitCode}\n- Events: ${r.totalEvents}${error ? `\n- Error: ${error}` : ''}\n\n\`\`\`\n${(r.response || '').substring(0, 500)}\n\`\`\``;
+  });
 
   return {
     content: [{
@@ -1294,7 +1360,15 @@ function handleGetScheduledResults(args) {
  */
 function handleCreatePipeline(args) {
   const cwd = args.cwd ?? defaultCwd;
-  const result = createPipeline(cwd, args);
+  let steps = args.steps.map(step => {
+    let provider = step.provider || DEFAULT_PROVIDER;
+    return {
+      ...step,
+      reasoningEffort: normalizeReasoningEffort(step.reasoningEffort ?? step.reasoning_effort, provider),
+      serviceTier: normalizeServiceTier(step.serviceTier ?? step.service_tier, provider),
+    };
+  });
+  const result = createPipeline(cwd, { ...args, steps });
   return {
     content: [{
       type: 'text',
@@ -1392,7 +1466,11 @@ function handleGetPipelineStatus(args) {
 
   const lines = Object.entries(run.steps).map(([name, s]) => {
     const emoji = emojiMap[s.status] || s.status;
-    return `- ${emoji} **${name}**: ${s.status}`;
+    let details = [];
+    if (s.exitCode !== undefined && s.exitCode !== null) details.push(`exit ${s.exitCode}`);
+    let error = diagnosticLine(s.error);
+    if (error) details.push(error);
+    return `- ${emoji} **${name}**: ${s.status}${details.length ? ` — ${details.join(' — ')}` : ''}`;
   });
 
   return {
@@ -1754,7 +1832,8 @@ async function handleDelegateToGroup(args) {
       cwd,
       provider: args.provider || profile.provider || group.provider || DEFAULT_PROVIDER,
       model: args.model || profile.model || group.model || undefined,
-      reasoningEffort: args.reasoningEffort || args.reasoning_effort || profile.profile?.reasoningEffort || profile.profile?.reasoning_effort || undefined,
+      reasoningEffort: args.reasoningEffort ?? args.reasoning_effort ?? profile.profile?.reasoningEffort ?? profile.profile?.reasoning_effort,
+      serviceTier: args.serviceTier ?? args.service_tier ?? profile.profile?.serviceTier ?? profile.profile?.service_tier,
       approval_mode: args.approval_mode || group.approval_mode || undefined,
       agent_slug: args.agent_slug,
       system_prompt: args.system_prompt,

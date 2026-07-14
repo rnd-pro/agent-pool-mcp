@@ -21,6 +21,7 @@ import { buildSshSpawn } from '../runner/ssh.js';
 import { killGroup } from '../runner/process-manager.js';
 import { consumeSignals, deleteSignals } from './run-signals.js';
 import { createClaudeDirectEnv } from '../runner/provider-config.js';
+import { boundedProcessError } from '../runner/process-error.js';
 import { getProjectStatePath, getTeamMemoryPath } from '../runtime/paths.js';
 import { getSlotLedger } from '../runner/slot-ledger.js';
 import { admitStep, redeemStepSlot, releaseStepSlot } from './step-capacity.js';
@@ -67,23 +68,58 @@ function createProviderEnv(provider, env) {
   return provider === 'claude' ? createClaudeDirectEnv(env) : env;
 }
 
-const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
 const CLAUDE_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
-function normalizeCodexReasoningEffort(value) {
-  let normalized = typeof value === 'string' ? value.trim() : '';
-  if (!normalized || normalized === 'default') return null;
-  return CODEX_REASONING_EFFORTS.has(normalized) ? normalized : null;
+function normalizeReasoningEffort(value, provider = 'codex') {
+  if (value !== undefined && value !== null) {
+    if (typeof value !== 'string') {
+      throw new Error('Invalid reasoningEffort: must be a string');
+    }
+    let trimmed = value.trim();
+    if (trimmed === '') {
+      throw new Error('Invalid reasoningEffort: must be a non-empty string');
+    }
+    if (trimmed === 'default') {
+      return null;
+    }
+    if (provider === 'codex') {
+      return trimmed;
+    }
+    if (provider === 'claude' && !CLAUDE_REASONING_EFFORTS.has(trimmed)) {
+      throw new Error(`Invalid reasoningEffort for Claude: ${trimmed}`);
+    }
+    if (provider === 'claude') {
+      return trimmed;
+    }
+    throw new Error(`reasoningEffort is only supported by Codex and Claude, not ${provider}`);
+  }
+  return null;
 }
 
-function normalizeClaudeReasoningEffort(value) {
-  let normalized = typeof value === 'string' ? value.trim() : '';
-  if (!normalized || normalized === 'default') return null;
-  return CLAUDE_REASONING_EFFORTS.has(normalized) ? normalized : null;
+function normalizeServiceTier(value, provider = 'codex') {
+  if (value !== undefined && value !== null) {
+    if (typeof value !== 'string') {
+      throw new Error('Invalid serviceTier: must be a string');
+    }
+    let trimmed = value.trim();
+    if (trimmed === '') {
+      throw new Error('Invalid serviceTier: must be a non-empty string');
+    }
+    if (trimmed === 'default') {
+      return null;
+    }
+    if (provider === 'codex') {
+      return trimmed;
+    }
+    throw new Error(`serviceTier is only supported by Codex, not ${provider}`);
+  }
+  return null;
 }
 
 function buildCliArgs(provider, prompt, opts = {}) {
   const model = opts.model && opts.model !== 'default' ? opts.model : null;
+  const reasoningEffort = normalizeReasoningEffort(opts.reasoningEffort, provider);
+  const serviceTier = normalizeServiceTier(opts.serviceTier, provider);
   if (provider === 'antigravity') {
     const args = ['-p', prompt];
     if (model) args.push('--model', model);
@@ -98,7 +134,6 @@ function buildCliArgs(provider, prompt, opts = {}) {
       '--permission-mode', claudePermissionMode(opts.approvalMode),
     ];
     if (model) args.push('--model', model);
-    const reasoningEffort = normalizeClaudeReasoningEffort(opts.reasoningEffort);
     if (reasoningEffort) args.push('--effort', reasoningEffort);
     return args;
   }
@@ -110,8 +145,12 @@ function buildCliArgs(provider, prompt, opts = {}) {
     '-s', codexSandbox(opts.approvalMode),
   ];
   if (model) args.push('--model', model);
-  const reasoningEffort = normalizeCodexReasoningEffort(opts.reasoningEffort);
-  if (reasoningEffort) args.push('-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`);
+  if (reasoningEffort) {
+    args.push('-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`);
+  }
+  if (serviceTier) {
+    args.push('-c', `service_tier=${JSON.stringify(serviceTier)}`);
+  }
   args.push(prompt);
   return args;
 }
@@ -240,6 +279,8 @@ function executeSchedule(schedule) {
   const args = buildCliArgs(provider, prompt, {
     approvalMode: schedule.approvalMode || 'yolo',
     model: schedule.model,
+    reasoningEffort: schedule.reasoningEffort ?? schedule.reasoning_effort,
+    serviceTier: schedule.serviceTier ?? schedule.service_tier,
   });
 
   const child = spawn(provider, args, {
@@ -267,6 +308,7 @@ function executeSchedule(schedule) {
       completedAt: new Date().toISOString(),
       exitCode: code,
       response: response.substring(0, 5000),
+      error: code === 0 ? null : boundedProcessError(stderr, code),
       totalEvents: events.length,
     };
 
@@ -481,11 +523,17 @@ function spawnStep(stepDef, run, runId, bounceReason) {
 
     let model = stepDef.model || groupProfile.model || groupConfig.model;
     let reasoningEffort = stepDef.reasoningEffort
-      || stepDef.reasoning_effort
-      || groupProfile.profile?.reasoningEffort
-      || groupProfile.profile?.reasoning_effort
-      || groupConfig.reasoningEffort
-      || groupConfig.reasoning_effort;
+      ?? stepDef.reasoning_effort
+      ?? groupProfile.profile?.reasoningEffort
+      ?? groupProfile.profile?.reasoning_effort
+      ?? groupConfig.reasoningEffort
+      ?? groupConfig.reasoning_effort;
+    let serviceTier = stepDef.serviceTier
+      ?? stepDef.service_tier
+      ?? groupProfile.profile?.serviceTier
+      ?? groupProfile.profile?.service_tier
+      ?? groupConfig.serviceTier
+      ?? groupConfig.service_tier;
 
     if (skill) {
       // Skills can be active via prompt injection, as we do for scheduled tasks
@@ -495,6 +543,7 @@ function spawnStep(stepDef, run, runId, bounceReason) {
       approvalMode: stepDef.approvalMode || 'yolo',
       model,
       reasoningEffort,
+      serviceTier,
     });
     if (provider === 'antigravity' && (policy || groupConfig.include_dirs?.length > 0)) {
       const notes = [];
@@ -542,6 +591,11 @@ function spawnStep(stepDef, run, runId, bounceReason) {
     }
 
     const child = spawn(spawnCmd, spawnArgs, spawnOpts);
+    let stderr = '';
+    child.stdout.on('data', () => {});
+    child.stderr.on('data', chunk => {
+      if (stderr.length < 4000) stderr += chunk.toString();
+    });
 
     child.on('close', (code) => {
       // Update step exit code in in-memory state directly (same process)
@@ -549,8 +603,10 @@ function spawnStep(stepDef, run, runId, bounceReason) {
       if (currentRun?.steps[stepDef.name]) {
         if (code !== 0) {
           currentRun.steps[stepDef.name].exitCode = code;
+          currentRun.steps[stepDef.name].error = boundedProcessError(stderr, code);
         } else if (currentRun.steps[stepDef.name].exitCode === null) {
           currentRun.steps[stepDef.name].exitCode = 0;
+          currentRun.steps[stepDef.name].error = null;
         }
         // Write-through to disk
         persistRun(runId, currentRun);

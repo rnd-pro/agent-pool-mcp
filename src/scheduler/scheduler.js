@@ -32,6 +32,14 @@ function pidPath(cwd) {
   return getProjectStatePath(cwd, PID_FILE);
 }
 
+function normalizeOptionalSetting(value, name) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new Error(`Invalid ${name}: must be a string`);
+  let normalized = value.trim();
+  if (!normalized) throw new Error(`Invalid ${name}: must be a non-empty string`);
+  return normalized === 'default' ? null : normalized;
+}
+
 // ─── Schedule CRUD ──────────────────────────────────────────
 
 /**
@@ -69,13 +77,15 @@ function writeSchedules(cwd, schedules) {
  * @param {string} opts.cron - Cron expression (5-field)
  * @param {string} [opts.provider] - CLI provider
  * @param {string} [opts.model] - Model ID
+ * @param {string} [opts.reasoningEffort] - Provider reasoning effort
+ * @param {string} [opts.serviceTier] - Codex service tier
  * @param {string} [opts.skill] - Skill to activate
  * @param {string} [opts.approvalMode] - yolo | auto_edit | plan
  * @param {boolean} [opts.catchup] - Run missed schedules on restart
  * @param {string} [opts.taskCwd] - Working directory for the task
  * @returns {{ scheduleId: string, nextRun: string | null }}
  */
-export function addSchedule(cwd, { prompt, cron, provider, model, skill, approvalMode, catchup, taskCwd }) {
+export function addSchedule(cwd, { prompt, cron, provider, model, reasoningEffort, serviceTier, skill, approvalMode, catchup, taskCwd }) {
   const schedules = readSchedules(cwd);
   const id = randomUUID().split('-')[0]; // short ID
   const schedule = {
@@ -84,6 +94,8 @@ export function addSchedule(cwd, { prompt, cron, provider, model, skill, approva
     cron,
     provider: provider || 'codex',
     model: model || null,
+    reasoningEffort: normalizeOptionalSetting(reasoningEffort, 'reasoningEffort'),
+    serviceTier: normalizeOptionalSetting(serviceTier, 'serviceTier'),
     cwd: taskCwd || cwd,
     skill: skill || null,
     approvalMode: approvalMode || 'yolo',

@@ -29,6 +29,14 @@ function runsDir(cwd) {
   return getProjectStatePath(cwd, RUNS_DIR);
 }
 
+function normalizeOptionalSetting(value, name) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new Error(`Invalid ${name}: must be a string`);
+  let normalized = value.trim();
+  if (!normalized) throw new Error(`Invalid ${name}: must be a non-empty string`);
+  return normalized === 'default' ? null : normalized;
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 /**
@@ -85,6 +93,8 @@ export function createPipeline(cwd, { name, steps, onError }) {
       prompt: s.prompt || null,
       provider: s.provider || 'codex',
       model: s.model || null,
+      reasoningEffort: normalizeOptionalSetting(s.reasoningEffort ?? s.reasoning_effort, 'reasoningEffort'),
+      serviceTier: normalizeOptionalSetting(s.serviceTier ?? s.service_tier, 'serviceTier'),
       contentSource: s.contentSource || s.content_source || null,
       skill: s.skill || null,
       group: s.group || null,
@@ -159,6 +169,7 @@ export function runPipeline(cwd, pipelineId) {
       pid: null,     // Legacy / single pid
       pids: [],      // Array for parallel execution
       exitCode: null,
+      error: null,
       signaled: false,
       bounces: 0,
       lastBounceReason: null,

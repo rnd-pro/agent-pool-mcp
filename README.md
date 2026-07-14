@@ -35,6 +35,10 @@ When the primary agent and Antigravity workers are **different foundation models
 
 Non-blocking task delegation to CLI workers. The primary agent fires off a task and continues working — polling for results when ready. Workers get full filesystem access (`delegate_task`) or read-only mode (`delegate_task_readonly`). Cancel anytime with `cancel_task`.
 
+Codex tasks can pass model-specific `reasoningEffort` and `serviceTier` values.
+The same canonical fields are supported by resource-group profiles, scheduled
+tasks, and pipeline steps and are validated by the installed Codex CLI.
+
 ### Pipelines — Sequential Task Chains
 
 Multi-step workflows with automatic handoff between steps:
@@ -64,6 +68,17 @@ Schedule agents on a cron expression — a detached daemon survives IDE/CLI rest
 ```
 
 Results are saved to `.agent-portal/scheduled-results/` and retrievable via `get_scheduled_results`.
+
+```javascript
+schedule_task({
+  prompt: "Review open changes",
+  cron: "0 9 * * MON-FRI",
+  provider: "codex",
+  model: "default",
+  reasoningEffort: "high",
+  serviceTier: "priority"
+})
+```
 
 ### Team Memory Skill System
 

@@ -108,7 +108,7 @@ function normalizeStringList(value) {
  * @param {string} config.name - Group name (e.g. "backend-team")
  * @param {string} [config.provider] - Default CLI provider for agents in this group
  * @param {string} [config.model] - Default model for agents in this group
- * @param {Array<{provider?: string, model?: string, reasoningEffort?: string}>} [config.profiles] - Provider/model profiles
+ * @param {Array<{provider?: string, model?: string, reasoningEffort?: string, serviceTier?: string}>} [config.profiles] - Provider/model profiles
  * @param {string} [config.runner] - Default runner for agents in this group
  * @param {string} [config.skill] - Default skill for agents in this group
  * @param {string} [config.policy] - Default policy for agents in this group

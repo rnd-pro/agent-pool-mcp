@@ -42,7 +42,9 @@ if (process.env.CODEX_RUNNER_ENV_FILE) {
 if (process.env.CODEX_RUNNER_STDERR) {
   process.stderr.write(process.env.CODEX_RUNNER_STDERR);
 }
-if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.argv.includes('resume')) {
+if (process.env.CODEX_RUNNER_MODE === 'failure-exit') {
+  process.exit(2);
+} else if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.argv.includes('resume')) {
   process.stderr.write('Error: thread/resume: thread/resume failed: no rollout found for thread id stale-thread (code -32600)\\n');
   process.exit(1);
 } else if (process.env.CODEX_RUNNER_MODE === 'bootstrap-stall') {
@@ -203,7 +205,7 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
     assert.equal(args.includes('default'), false);
   });
 
-  it('passes Codex model and reasoning effort overrides', async () => {
+  it('passes Codex model and reasoning effort overrides, including service tier and validation', async () => {
     let argsFile = path.join(tmpDir, 'args-reasoning.json');
     process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
 
@@ -212,13 +214,59 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
       prompt: 'hello',
       cwd: tmpDir,
       model: 'gpt-5.5',
-      reasoningEffort: 'xhigh',
+      reasoningEffort: 'ultra',
+      serviceTier: 'priority',
       timeout: 5,
     });
 
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
     assert.equal(args[args.indexOf('--model') + 1], 'gpt-5.5');
-    assert.equal(args[args.indexOf('-c') + 1], 'model_reasoning_effort="xhigh"');
+
+    const reasoningIndex = args.indexOf('model_reasoning_effort="ultra"');
+    assert.ok(reasoningIndex > 0);
+    assert.equal(args[reasoningIndex - 1], '-c');
+
+    const tierIndex = args.indexOf('service_tier="priority"');
+    assert.ok(tierIndex > 0);
+    assert.equal(args[tierIndex - 1], '-c');
+
+    await assert.rejects(
+      () => runCodexStreaming({ prompt: 'hello', cwd: tmpDir, reasoningEffort: 123, timeout: 5 }),
+      /Invalid reasoningEffort: must be a string/
+    );
+
+    await assert.rejects(
+      () => runCodexStreaming({ prompt: 'hello', cwd: tmpDir, reasoningEffort: '   ', timeout: 5 }),
+      /Invalid reasoningEffort: must be a non-empty string/
+    );
+
+    await assert.rejects(
+      () => runCodexStreaming({ prompt: 'hello', cwd: tmpDir, serviceTier: true, timeout: 5 }),
+      /Invalid serviceTier: must be a string/
+    );
+
+    await assert.rejects(
+      () => runCodexStreaming({ prompt: 'hello', cwd: tmpDir, serviceTier: '', timeout: 5 }),
+      /Invalid serviceTier: must be a non-empty string/
+    );
+  });
+
+  it('trims default setting sentinels instead of forwarding them', async () => {
+    let argsFile = path.join(tmpDir, 'args-default-settings.json');
+    process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+
+    await runCodexStreaming({
+      prompt: 'hello',
+      cwd: tmpDir,
+      reasoningEffort: ' default ',
+      serviceTier: ' default ',
+      timeout: 5,
+    });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.equal(args.some(arg => arg.startsWith('model_reasoning_effort=')), false);
+    assert.equal(args.some(arg => arg.startsWith('service_tier=')), false);
   });
 
   it('passes a chat-scoped portal MCP config override to Codex', async () => {
@@ -299,5 +347,28 @@ if (process.env.CODEX_RUNNER_MODE === 'missing-rollout-on-resume' && process.arg
     assert.deepEqual(args.slice(0, 6), ['-a', 'never', 'exec', '--json', '-s', 'danger-full-access']);
     assert.equal(args.includes('stale-thread'), false);
     assert.match(args.at(-1), /continue$/);
+  });
+
+  it('surfaces non-zero exit code and stderr from CLI when invalid/unknown settings are rejected by Codex CLI', async () => {
+    let argsFile = path.join(tmpDir, 'args-failure.json');
+    process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
+    process.env.CODEX_RUNNER_STDERR = 'Error: Unknown config value service_tier="unsupported"\n';
+    process.env.CODEX_RUNNER_MODE = 'failure-exit';
+
+    let { runCodexStreaming } = await import('../src/runner/codex-runner.js');
+    let result = await runCodexStreaming({
+      prompt: 'hello',
+      cwd: tmpDir,
+      serviceTier: 'unsupported',
+      timeout: 5,
+    });
+
+    assert.equal(result.exitCode, 2);
+    assert.deepEqual(result.errors, ['Error: Unknown config value service_tier="unsupported"']);
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    const tierIndex = args.indexOf('service_tier="unsupported"');
+    assert.ok(tierIndex > 0);
+    assert.equal(args[tierIndex - 1], '-c');
   });
 });

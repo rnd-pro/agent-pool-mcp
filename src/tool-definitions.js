@@ -38,8 +38,14 @@ const DELEGATE_CONTEXT_PROPERTIES = {
 const PROVIDER_REASONING_EFFORT_PROPERTY = {
   reasoningEffort: {
     type: 'string',
-    enum: ['default', 'low', 'medium', 'high', 'xhigh', 'max'],
-    description: 'Provider reasoning effort. Codex maps to model_reasoning_effort; Claude Code maps to --effort. Claude Code also accepts max.',
+    description: 'Provider reasoning effort. Codex accepts the selected model value and maps it to model_reasoning_effort. Claude Code accepts low, medium, high, xhigh, or max and maps it to --effort.',
+  },
+};
+
+const PROVIDER_SERVICE_TIER_PROPERTY = {
+  serviceTier: {
+    type: 'string',
+    description: 'Service tier for Codex. Codex maps to service_tier.',
   },
 };
 
@@ -101,6 +107,7 @@ export function getToolDefinitions(ctx = {}) {
         cwd: { type: 'string', description: 'Working directory for the agent. Defaults to current working directory.' },
         model: { type: 'string', description: modelDesc },
         ...PROVIDER_REASONING_EFFORT_PROPERTY,
+        ...PROVIDER_SERVICE_TIER_PROPERTY,
         approval_mode: {
           type: 'string',
           enum: ['yolo', 'auto_edit', 'plan'],
@@ -145,6 +152,7 @@ export function getToolDefinitions(ctx = {}) {
         provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'], description: 'CLI provider to use. codex = Codex CLI, antigravity = Antigravity CLI, opencode = OpenCode CLI, claude = Claude Code CLI. Default: codex.' },
         model: { type: 'string', description: modelDesc },
         ...PROVIDER_REASONING_EFFORT_PROPERTY,
+        ...PROVIDER_SERVICE_TIER_PROPERTY,
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600 (10 minutes).' },
         session_id: { type: 'string', description: 'Resume an existing provider session/thread by ID. Supported by Antigravity, Codex, OpenCode, and Claude Code where available. Use list_sessions for Antigravity sessions.' },
         runner: { type: 'string', description: 'Runner ID from agent-pool.config.json. Default: "local". Use SSH runners for remote execution.' },
@@ -356,6 +364,8 @@ export function getToolDefinitions(ctx = {}) {
         cron: { type: 'string', description: 'Cron expression (5-field). E.g. "0 9 * * *" for daily at 9am.' },
         provider: { type: 'string', enum: ['codex', 'antigravity', 'claude'], description: 'CLI provider for scheduled runs. Default: codex.' },
         model: { type: 'string', description: 'Model to use. Leave empty for provider default.' },
+        ...PROVIDER_REASONING_EFFORT_PROPERTY,
+        ...PROVIDER_SERVICE_TIER_PROPERTY,
         cwd: { type: 'string', description: 'Working directory for the scheduled task. Defaults to current directory.' },
         skill: { type: 'string', description: 'Skill to activate for each run.' },
         approval_mode: {
@@ -421,6 +431,8 @@ export function getToolDefinitions(ctx = {}) {
               prompt: { type: 'string', description: 'Step prompt.' },
               provider: { type: 'string', enum: ['codex', 'antigravity', 'claude'], description: 'CLI provider for this step. Default: codex.' },
               model: { type: 'string', description: 'Model to use. Leave empty for provider default.' },
+              ...PROVIDER_REASONING_EFFORT_PROPERTY,
+              ...PROVIDER_SERVICE_TIER_PROPERTY,
               trigger: { type: 'string', description: 'Trigger condition.' },
               skill: { type: 'string', description: 'Skill to use.' },
               approval_mode: { type: 'string', description: 'Approval mode.' },
@@ -537,6 +549,7 @@ export function getToolDefinitions(ctx = {}) {
               provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'] },
               model: { type: 'string' },
               ...PROVIDER_REASONING_EFFORT_PROPERTY,
+              ...PROVIDER_SERVICE_TIER_PROPERTY,
               allowed_tools: { type: 'array', items: { type: 'string' } },
             },
           },
@@ -597,6 +610,7 @@ export function getToolDefinitions(ctx = {}) {
         provider: { type: 'string', enum: ['codex', 'antigravity', 'opencode', 'claude'], description: 'CLI provider override for this group delegation. Default: group provider or codex.' },
         model: { type: 'string', description: 'Model override for this group delegation. Default: group profile/model.' },
         ...PROVIDER_REASONING_EFFORT_PROPERTY,
+        ...PROVIDER_SERVICE_TIER_PROPERTY,
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode override passed to child tasks.' },
         agent_slug: { type: 'string', description: 'Agent role slug passed to child tasks.' },
         chat_id: { type: 'string', description: 'Existing chat ID to bind child tasks to.' },

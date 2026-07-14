@@ -76,7 +76,6 @@ function sandboxMode(approvalMode) {
   return 'danger-full-access';
 }
 
-const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
 const CODEX_CHAT_MCP_SERVER = 'agent-portal-chat';
 const CODEX_HEADLESS_APPROVAL_ARGS = ['-a', 'never'];
 const CODEX_CHAT_MCP_APPROVED_TOOLS = [
@@ -93,10 +92,16 @@ const CODEX_CHAT_MCP_APPROVED_TOOLS = [
 const CODEX_BOOTSTRAP_IGNORED_EVENT_TYPES = new Set(['session_meta']);
 const CODEX_BOOTSTRAP_IGNORED_PAYLOAD_TYPES = new Set(['task_started']);
 
-function normalizeReasoningEffort(value) {
-  let normalized = typeof value === 'string' ? value.trim() : '';
-  if (!normalized || normalized === 'default') return null;
-  return CODEX_REASONING_EFFORTS.has(normalized) ? normalized : null;
+function normalizeCodexSetting(value, name) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid ${name}: must be a string`);
+  }
+  let normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`Invalid ${name}: must be a non-empty string`);
+  }
+  return normalized === 'default' ? null : normalized;
 }
 
 function tomlString(value) {
@@ -123,8 +128,18 @@ function isMissingRolloutError(errors) {
   return errors.some(error => /thread\/resume failed: no rollout found|no rollout found for thread id/i.test(String(error)));
 }
 
-export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approvalMode, timeout, sessionId, taskId, chat_id, taskSecret, resumeFallbackAttempted = false }) {
-  return new Promise((resolve) => {
+export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, serviceTier, approvalMode, timeout, sessionId, taskId, chat_id, taskSecret, resumeFallbackAttempted = false }) {
+  return new Promise((resolve, reject) => {
+    let normalizedReasoningEffort;
+    let normalizedServiceTier;
+    try {
+      normalizedReasoningEffort = normalizeCodexSetting(reasoningEffort, 'reasoningEffort');
+      normalizedServiceTier = normalizeCodexSetting(serviceTier, 'serviceTier');
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
     let finalPrompt = prompt;
     try {
       let teamRulesPath = join(process.env.PORTAL_CONFIG_DIR || join(homedir(), '.agent-portal'), 'context', 'team', 'team-rules.md');
@@ -147,9 +162,12 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
       args.push('--model', effectiveModel);
     }
 
-    let effectiveReasoningEffort = normalizeReasoningEffort(reasoningEffort);
-    if (effectiveReasoningEffort) {
-      args.push('-c', `model_reasoning_effort=${JSON.stringify(effectiveReasoningEffort)}`);
+    if (normalizedReasoningEffort) {
+      args.push('-c', `model_reasoning_effort=${JSON.stringify(normalizedReasoningEffort)}`);
+    }
+
+    if (normalizedServiceTier) {
+      args.push('-c', `service_tier=${JSON.stringify(normalizedServiceTier)}`);
     }
 
     let portalUrl = resolvePortalUrl();
@@ -384,6 +402,7 @@ export function runCodexStreaming({ prompt, cwd, model, reasoningEffort, approva
           cwd,
           model,
           reasoningEffort,
+          serviceTier,
           approvalMode,
           timeout,
           sessionId: null,
