@@ -209,6 +209,46 @@ Install agent-pool inside Antigravity CLI to enable hierarchical delegation — 
 
 See [parallel-work guide](examples/parallel-work.md) and built-in `orchestrator` skill for patterns.
 
+## Verification Evidence Registry
+
+The provider-neutral registry avoids repeating expensive checks when their
+explicit inputs, configuration, command, runtime, and environment fingerprint
+have not changed. Cooperative single-flight ensures that concurrent identical
+checks execute once.
+
+### Core Registry Tools
+
+- **`prepare_verification`**: Returns `run`, `wait`, or `reuse` for a valid
+  contract. A `run` response includes the lease and an owner-only runtime path
+  to which the caller redirects command output.
+- **`complete_verification`**: Publishes bounded metadata with the matching
+  fingerprint and unexpired lease. Only `success` with exit code `0` becomes
+  reusable green evidence.
+- **`get_verification_evidence`**: Inspects `wait`, `reusable`, `stale`,
+  `expired`, or `missing` state without acquiring a verification lease.
+
+### Key Characteristics
+
+1. **Explicit Input Contract**: The registry requires readable, in-worktree
+   `inputs` and rejects an empty, missing, out-of-root, or symlinked scope. A
+   contract error is not permission to run without a lease.
+2. **Worktree Stability**: Repository identity comes from the Git common
+   directory, while input paths remain relative to each worktree root. Matching
+   content and commands in linked worktrees therefore share a fingerprint.
+3. **No Inference Or Execution**: The registry does **not** infer affected tests
+   or execute commands. Calling agents choose the scope, run the command, and
+   publish its result.
+4. **Freshness Policies**: Every prepare/status query declares
+   `max_age_seconds`. `force_fresh` bypasses reuse while retaining
+   single-flight; `non_cacheable` also prevents green publication.
+5. **Private And Bounded State**: State lives under
+   `AGENT_POOL_VERIFICATION_DIR` or `~/.agent-portal/verification-evidence`.
+   Directories use `0700`, files use `0600`, each log is byte-bounded, and each
+   fingerprint retains bounded history. Only the `run` response exposes the
+   absolute local log path needed for redirection; reusable evidence exposes an
+   opaque `log_ref` and bounded summary. Raw environment values are never
+   accepted or returned.
+
 ## MCP Ecosystem
 
 Best used as part of [**mcp-agent-portal**](https://github.com/rnd-pro/mcp-agent-portal) — a unified MCP aggregator that combines all RND-PRO servers behind a single config entry:

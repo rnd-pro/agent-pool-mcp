@@ -169,6 +169,9 @@ describe('context resolver', () => {
 
     assert.ok(result.zones.includes('ui'));
     assert.equal(result.toolProfile, 'implementation');
+    assert.ok(result.tools.includes('prepare_verification'));
+    assert.ok(result.tools.includes('complete_verification'));
+    assert.ok(result.tools.includes('get_verification_evidence'));
     assert.ok(result.skills.some(skill => skill.name === 'symbiote-components'));
   });
 
@@ -185,6 +188,8 @@ describe('context resolver', () => {
 
     assert.ok(result.zones.includes('gateway'));
     assert.equal(result.toolProfile, 'review');
+    assert.ok(result.tools.includes('get_verification_evidence'));
+    assert.ok(!result.tools.includes('complete_verification'));
     assert.ok(result.skills.some(skill => skill.name === 'testing-discipline'));
   });
 
@@ -229,6 +234,7 @@ describe('context resolver', () => {
     assert.ok(result.zones.includes('context-system'));
     assert.ok(result.zones.includes('workflow-system'));
     assert.equal(result.toolProfile, 'workflow');
+    assert.ok(result.tools.includes('prepare_verification'));
     assert.ok(!result.tags.includes('async-patterns'));
     assert.ok(!result.skills.some(skill => skill.category === 'agents'));
   });

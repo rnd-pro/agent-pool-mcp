@@ -15,9 +15,11 @@ src/
 ├── cli.js                  ← CLI commands (--check, --init, --help)
 ├── server.js               ← MCP server setup + tool routing
 ├── tool-definitions.js     ← Tool schemas (JSON Schema)
+├── verification/           ← Evidence fingerprints, leases, storage, and lifecycle operations
 ├── tools/
 │   ├── consult.js          ← Peer review via Antigravity CLI
 │   ├── results.js          ← Task store + result formatting (TTL cleanup, ring buffer)
+│   ├── verification-registry.js ← Public verification tool facade
 │   └── skills.js           ← 3-tier skill management (project/global/built-in)
 ├── runner/
 │   ├── config.js           ← Runner config loader (local/SSH)

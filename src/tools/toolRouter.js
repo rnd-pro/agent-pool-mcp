@@ -49,6 +49,9 @@ export function createToolRouter({ handlers, guardToolCall, getActiveTasks }) {
     list_workflows: handlers.handleListWorkflows,
     search_by_tags: handlers.handleSearchByTags,
     get_workflow_content: handlers.handleGetWorkflowContent,
+    prepare_verification: handlers.handlePrepareVerification,
+    complete_verification: handlers.handleCompleteVerification,
+    get_verification_evidence: handlers.handleGetVerificationEvidence,
   };
 
   return async (request) => {

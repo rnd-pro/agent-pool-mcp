@@ -95,12 +95,14 @@ const ZONES = {
   },
 };
 
+const VERIFICATION_TOOLS = ['prepare_verification', 'complete_verification', 'get_verification_evidence'];
+
 const PROFILE_TOOLS = {
-  direct: ['discover_tools', 'call_tool', 'get_portal_status'],
-  review: ['discover_tools', 'call_tool', 'get_skeleton', 'get_ai_context', 'get_task_result', 'list_workflows', 'search_by_tags'],
-  implementation: ['discover_tools', 'call_tool', 'get_skeleton', 'get_ai_context', 'delegate_task', 'get_task_result', 'list_skills', 'search_by_tags'],
-  orchestrator: ['discover_tools', 'call_tool', 'delegate_task', 'delegate_task_readonly', 'get_task_result', 'list_groups', 'delegate_to_group', 'list_skills', 'list_workflows'],
-  workflow: ['discover_tools', 'call_tool', 'list_workflows', 'search_by_tags', 'get_workflow_content', 'signal_step_complete', 'bounce_back'],
+  direct: ['discover_tools', 'call_tool', 'get_portal_status', ...VERIFICATION_TOOLS],
+  review: ['discover_tools', 'call_tool', 'get_skeleton', 'get_ai_context', 'get_task_result', 'list_workflows', 'search_by_tags', 'get_verification_evidence'],
+  implementation: ['discover_tools', 'call_tool', 'get_skeleton', 'get_ai_context', 'delegate_task', 'get_task_result', 'list_skills', 'search_by_tags', ...VERIFICATION_TOOLS],
+  orchestrator: ['discover_tools', 'call_tool', 'delegate_task', 'delegate_task_readonly', 'get_task_result', 'list_groups', 'delegate_to_group', 'list_skills', 'list_workflows', ...VERIFICATION_TOOLS],
+  workflow: ['discover_tools', 'call_tool', 'list_workflows', 'search_by_tags', 'get_workflow_content', 'signal_step_complete', 'bounce_back', ...VERIFICATION_TOOLS],
 };
 
 function uniq(values) {

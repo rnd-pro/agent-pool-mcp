@@ -775,6 +775,64 @@ export function getToolDefinitions(ctx = {}) {
         cwd: { type: 'string', description: 'Working directory. Defaults to current working directory.' },
       },
     },
+  },
+  {
+    name: 'prepare_verification',
+    description: 'Prepare a verification check. Requests a lease to run the check or returns existing green evidence for reuse. Prevents concurrent duplicate runs.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        check_kind: { type: 'string', minLength: 1, maxLength: 100, description: 'The verification category/kind (e.g. "test", "lint", "compile").' },
+        command: { type: 'string', minLength: 1, maxLength: 8192, description: 'The exact terminal command run for verification (e.g. "npm test -- --grep auth", "eslint src/").' },
+        cwd: { type: 'string', minLength: 1, maxLength: 4096, description: 'Command working directory.' },
+        inputs: { type: 'array', minItems: 1, maxItems: 1024, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 4096 }, description: 'Explicit list of file/directory input paths that affect the verification check.' },
+        control_files: { type: 'array', maxItems: 256, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 4096 }, description: 'Relevant control/configuration file paths (e.g. "package.json", "eslint.config.js").' },
+        env_keys: { type: 'array', maxItems: 128, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 }, description: 'Environment variable keys whose current values affect the check.' },
+        env_fingerprints: { type: 'object', maxProperties: 128, additionalProperties: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' }, description: 'Pre-hashed SHA-256 values for command-specific environment overrides. Raw values are forbidden.' },
+        max_age_seconds: { type: 'integer', minimum: 0, description: 'Maximum age of evidence in seconds to allow reuse. Stale evidence is not reused.' },
+        cache_policy: { type: 'string', enum: ['default', 'force_fresh', 'non_cacheable'], description: 'Cache policy: default, force_fresh (rerun but support single-flight), non_cacheable (do not cache result).' },
+        lease_ttl: { type: 'integer', minimum: 1, maximum: 86400, description: 'Time-to-live for the lease in seconds. Default: 300.' },
+        run_id: { type: 'string', maxLength: 100, description: 'Identifier for the calling run/task. It is metadata, never a filename.' },
+      },
+      required: ['check_kind', 'command', 'inputs', 'max_age_seconds'],
+    },
+  },
+  {
+    name: 'complete_verification',
+    description: 'Publish verification check completion. Saves green evidence if status is success and exit code is 0, bounds outputs, and releases the lease.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        fingerprint: { type: 'string', pattern: '^[0-9a-fA-F]{64}$', description: 'The verification fingerprint.' },
+        lease_id: { type: 'string', minLength: 1, maxLength: 64, description: 'The lease ID granted during prepare_verification.' },
+        status: { type: 'string', enum: ['success', 'failure', 'timeout', 'cancelled'], description: 'The verification execution completion status.' },
+        exit_code: { type: 'integer', description: 'The terminal exit code of the execution. Zero indicates success.' },
+        summary: { type: 'string', maxLength: 500, description: 'Bounded summary of the execution outcome.' },
+        errors: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 500 }, description: 'Optional bounded error messages.' },
+      },
+      required: ['fingerprint', 'lease_id', 'status', 'exit_code'],
+    },
+  },
+  {
+    name: 'get_verification_evidence',
+    description: 'Inspect the exact verification contract without obtaining a lease. Returns wait, reusable, stale, expired, or missing state.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        check_kind: { type: 'string', minLength: 1, maxLength: 100, description: 'The verification category/kind.' },
+        command: { type: 'string', minLength: 1, maxLength: 8192, description: 'The exact terminal command run for verification.' },
+        cwd: { type: 'string', minLength: 1, maxLength: 4096, description: 'Command working directory.' },
+        inputs: { type: 'array', minItems: 1, maxItems: 1024, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 4096 }, description: 'Explicit list of file/directory input paths.' },
+        control_files: { type: 'array', maxItems: 256, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 4096 }, description: 'Relevant control/configuration file paths.' },
+        env_keys: { type: 'array', maxItems: 128, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 }, description: 'Environment variable keys.' },
+        env_fingerprints: { type: 'object', maxProperties: 128, additionalProperties: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' }, description: 'Pre-hashed SHA-256 values for command-specific environment overrides.' },
+        max_age_seconds: { type: 'integer', minimum: 0, description: 'Maximum age of evidence in seconds to allow reuse.' },
+      },
+      required: ['check_kind', 'command', 'inputs', 'max_age_seconds'],
+    },
   }
 ];
 }

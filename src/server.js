@@ -40,6 +40,7 @@ import { handleResolveContext } from './tools/context-resolver.js';
 import { buildResolvedContextPackage } from './tools/context-package.js';
 import { buildDelegatePrompt } from './tools/delegate-prompt.js';
 import { createToolRouter } from './tools/toolRouter.js';
+import { prepareVerification, completeVerification, getVerificationEvidence } from './tools/verification-registry.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
 
@@ -632,6 +633,9 @@ export function createServer() {
       handleListWorkflows: (args) => handleListWorkflows(args, defaultCwd),
       handleSearchByTags: (args) => handleSearchByTags(args, defaultCwd),
       handleGetWorkflowContent: (args) => handleGetWorkflowContent(args, defaultCwd),
+      handlePrepareVerification,
+      handleCompleteVerification,
+      handleGetVerificationEvidence,
     },
   }));
 
@@ -690,6 +694,36 @@ function handleGetBoardState(args) {
 
 function handleConsultPeer(args) {
   return consultPeer(args, defaultCwd);
+}
+
+async function handlePrepareVerification(args) {
+  return handleVerificationOperation(() => prepareVerification(args));
+}
+
+async function handleCompleteVerification(args) {
+  return handleVerificationOperation(() => completeVerification(args));
+}
+
+async function handleGetVerificationEvidence(args) {
+  return handleVerificationOperation(() => getVerificationEvidence(args));
+}
+
+async function handleVerificationOperation(operation) {
+  try {
+    let result = await operation();
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (error) {
+    if (error?.code !== 'VERIFICATION_CONTRACT_INVALID') throw error;
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ ok: false, error: { code: error.code, message: error.message } }),
+      }],
+      isError: true,
+    };
+  }
 }
 
 function handleSaveScript(args) {
