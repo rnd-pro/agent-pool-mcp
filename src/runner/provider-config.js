@@ -147,6 +147,72 @@ export function createClaudeMcpConfig(portalUrl, taskSecret) {
   return { configPath, tmpDir };
 }
 
+/**
+ * Create an isolated Kimi Code home directory with portal MCP injection.
+ * Kimi Code reads all runtime data from KIMI_CODE_HOME: config.toml holds
+ * permission rules, mcp.json holds MCP server declarations, credentials/
+ * holds OAuth login state. The runner points KIMI_CODE_HOME at this directory
+ * so worker agents inherit the user's login but not their full config.
+ * Sub-agent tools (Agent/AgentSwarm) are denied so pool workers cannot spawn
+ * unmanaged nested agents.
+ * When a per-task secret is supplied it is attached as a request header so the
+ * portal can verify the agent's identity; absent it, no headers are written and
+ * the connection resolves to the anonymous read-only principal.
+ *
+ * @param {string} [portalUrl] - Portal MCP URL; mcp.json is only written when set
+ * @param {string} [taskSecret] - Per-task secret for verified identity
+ * @param {string} [chatId] - Chat id (reserved for future use)
+ * @returns {{ kimiHomeDir: string, tmpDir: string }}
+ */
+export function createKimiHomeDir(portalUrl, taskSecret, chatId) {
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hub-'));
+
+  // Base the isolated config on the user's own config.toml (provider/oauth
+  // references live there), then append the pool's permission rules.
+  let userHome = process.env.KIMI_CODE_HOME || path.join(os.homedir(), '.kimi-code');
+  let baseConfig = '';
+  try {
+    baseConfig = fs.readFileSync(path.join(userHome, 'config.toml'), 'utf8').trimEnd();
+  } catch { /* no user config — start empty */ }
+
+  let permissionBlock = [
+    '',
+    '# Agent Portal pool rules: pool workers must not spawn unmanaged nested agents.',
+    '[[permission.rules]]',
+    'decision = "deny"',
+    'pattern = "Agent"',
+    '',
+    '[[permission.rules]]',
+    'decision = "deny"',
+    'pattern = "AgentSwarm"',
+    '',
+  ].join('\n');
+
+  fs.writeFileSync(path.join(tmpDir, 'config.toml'), (baseConfig ? baseConfig + '\n' : '') + permissionBlock);
+
+  if (portalUrl) {
+    let mcpConfig = {
+      mcpServers: {
+        'agent-portal-chat': {
+          url: portalUrl,
+          ...(taskSecret ? { headers: { [TASK_SECRET_HEADER]: taskSecret } } : {}),
+        },
+      },
+    };
+    fs.writeFileSync(path.join(tmpDir, 'mcp.json'), JSON.stringify(mcpConfig, null, 2));
+  }
+
+  // Carry over OAuth login state so the isolated home stays authenticated.
+  let credentialsSrc = path.join(userHome, 'credentials');
+  if (fs.existsSync(credentialsSrc)) {
+    try {
+      fs.cpSync(credentialsSrc, path.join(tmpDir, 'credentials'), { recursive: true });
+    } catch { /* non-critical — the run falls back to whatever auth remains */ }
+  }
+
+  return { kimiHomeDir: tmpDir, tmpDir };
+}
+
 const CLAUDE_DIRECT_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',

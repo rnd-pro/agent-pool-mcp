@@ -19,6 +19,7 @@ import { runAntigravityStreaming, listAntigravitySessions } from './runner/antig
 import { runOpencodeStreaming } from './runner/opencode-runner.js';
 import { runCodexStreaming } from './runner/codex-runner.js';
 import { runClaudeStreaming } from './runner/claude-runner.js';
+import { runKimiStreaming } from './runner/kimi-runner.js';
 import { loadConfig } from './runner/config.js';
 import { runHistoryCleanup } from './runner/history-cleanup.js';
 import { getSystemLoad } from './runner/process-manager.js';
@@ -152,6 +153,19 @@ function checkClaude() {
   return claudeAvailable;
 }
 
+let kimiAvailable = null;
+
+function checkKimi() {
+  if (kimiAvailable !== null) return kimiAvailable;
+  try {
+    execFileSync('which', ['kimi'], { encoding: 'utf-8', timeout: 2000 });
+    kimiAvailable = true;
+  } catch (e) {
+    kimiAvailable = false;
+  }
+  return kimiAvailable;
+}
+
 // ─── Dynamic model discovery (cached) ────────────────────────
 
 let _cachedModels = [];
@@ -283,6 +297,9 @@ function guardToolCall(name, args = {}) {
     return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
   }
   if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
+  if (provider === 'kimi' && !checkKimi()) {
+    return { content: [{ type: 'text', text: '❌ Kimi Code CLI is not installed or not in PATH.' }], isError: true };
+  }
   return null;
 }
 
@@ -301,6 +318,7 @@ function selectStreamingRunner(provider, taskId) {
   if (provider === 'opencode') return runOpencodeStreaming;
   if (provider === 'codex') return runCodexStreaming;
   if (provider === 'claude') return runClaudeStreaming;
+  if (provider === 'kimi') return runKimiStreaming;
   if (provider === 'antigravity') return runAntigravityStreaming;
   return runCodexStreaming;
 }
@@ -315,6 +333,9 @@ function providerRequirementError(provider) {
     return { content: [{ type: 'text', text: '❌ Codex CLI is not installed or not in PATH.' }], isError: true };
   }
   if (provider === 'claude' && !checkClaude()) return CLAUDE_REQUIRED_ERROR;
+  if (provider === 'kimi' && !checkKimi()) {
+    return { content: [{ type: 'text', text: '❌ Kimi Code CLI is not installed or not in PATH.' }], isError: true };
+  }
   return null;
 }
 
