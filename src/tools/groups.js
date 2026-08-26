@@ -119,6 +119,7 @@ function normalizeStringList(value) {
  * @param {string[]} [config.allowed_tools] - Provider tool allowlist passed to compatible runners
  * @param {string} [config.model_tier] - Logical model tier ('basic', 'advanced')
  * @param {string} [config.rotation_mode] - Rotation strategy ('error_fallback' or 'round_robin')
+ * @param {boolean} [config.opencode_catalog_override] - Declare the exact selected model in OpenCode's process-local catalog
  * @returns {{ name: string, created: boolean }}
  */
 export function createGroup(cwd, config) {
@@ -138,6 +139,7 @@ export function createGroup(cwd, config) {
     include_dirs: config.include_dirs || null,
     allowed_tools: normalizeStringList(config.allowed_tools || config.allowedTools),
     model_tier: config.model_tier || null,
+    opencode_catalog_override: config.opencode_catalog_override === true || config.opencodeCatalogOverride === true,
     rotation_mode: config.rotation_mode || 'error_fallback',
     created_at: existed ? groups[config.name].created_at : new Date().toISOString(),
     updated_at: new Date().toISOString(),

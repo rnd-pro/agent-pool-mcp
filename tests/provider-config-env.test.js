@@ -74,6 +74,28 @@ describe('Provider Config Injector', () => {
     assert.equal(config.mcp['agent-portal'].type, 'remote');
     assert.equal(config.mcp['agent-portal'].enabled, true);
     assert.equal(config.mcp['agent-portal'].oauth, false);
+    assert.equal('provider' in config, false);
+  });
+
+  it('createOpenCodeEnv can declare one exact process-local provider model without copying credentials', async () => {
+    let { createOpenCodeEnv } = await import('../src/runner/provider-config.js');
+
+    let { tmpDir, envOverrides } = createOpenCodeEnv('http://portal.local/mcp', 'secret-abc', {
+      model: 'openrouter/stealth/ox-alpha',
+      modelCatalogOverride: true,
+    });
+    tmpDirsToCleanup.push(tmpDir);
+
+    let config = JSON.parse(fs.readFileSync(envOverrides.OPENCODE_CONFIG, 'utf8'));
+    assert.deepEqual(config.provider, {
+      openrouter: {
+        models: {
+          'stealth/ox-alpha': { name: 'stealth/ox-alpha' },
+        },
+      },
+    });
+    assert.equal(JSON.stringify(config).includes('API_KEY'), false);
+    assert.equal(config.mcp['agent-portal'].headers['X-Agent-Portal-Task-Secret'], 'secret-abc');
   });
 
   it('createOpenCodeEnv embeds the task-secret header when a secret is supplied', async () => {

@@ -83,6 +83,10 @@ function getTaskMeta(taskId) {
     resourceGroup: entry.resourceGroup,
     provider: entry.provider,
     model: entry.model,
+    promptSha256: entry.promptSha256,
+    promptBytes: entry.promptBytes,
+    modelSha256: entry.modelSha256,
+    resourceConfigSha256: entry.resourceConfigSha256,
     runner: entry.runner,
     skill: entry.skill,
     sessionId: entry.sessionId,
@@ -172,6 +176,10 @@ export function createTask(taskId, prompt, waitHint, approvalMode, cwd = process
     admissionId: metadata.admissionId ?? null,
     provider: metadata.provider ?? null,
     model: metadata.model ?? null,
+    promptSha256: metadata.promptSha256 ?? null,
+    promptBytes: metadata.promptBytes ?? null,
+    modelSha256: metadata.modelSha256 ?? null,
+    resourceConfigSha256: metadata.resourceConfigSha256 ?? null,
     runner: metadata.runner ?? null,
     skill: metadata.skill ?? null,
     sessionId: metadata.sessionId ?? null,
@@ -317,19 +325,22 @@ export function updateTaskResult(taskId, result) {
  *
  * @param {string} taskId
  * @param {string} errorMessage
+ * @param {object|null} [result] - Structured failed provider result for diagnostics
  */
-export function failTask(taskId, errorMessage) {
+export function failTask(taskId, errorMessage, result = null) {
   const entry = taskStore.get(taskId);
   if (entry) {
     entry.status = 'error';
     entry.error = errorMessage;
+    entry.result = result;
     entry.completedAt = Date.now();
     entry.pid = null;
     _ledgerRelease(entry);
+    if (result?.sessionId) entry.sessionId = result.sessionId;
 
     getBoardStore(entry.cwd).updateNodeStatus(taskId, { status: 'error', completedAt: new Date().toISOString() });
 
-    if (_notifyCallback) _notifyCallback(taskId, 'error', { error: errorMessage, meta: getTaskMeta(taskId) });
+    if (_notifyCallback) _notifyCallback(taskId, 'error', { error: errorMessage, result, meta: getTaskMeta(taskId) });
   }
 }
 
@@ -573,13 +584,17 @@ function buildTaskList() {
       agentSlug: entry.agentSlug,
       startedAt: entry.startedAt,
       completedAt: entry.completedAt,
-      elapsedMs: Date.now() - entry.startedAt,
+      elapsedMs: (entry.completedAt ?? Date.now()) - entry.startedAt,
       eventCount: entry.liveEvents?.length ?? 0,
       lastEventAt: entry.lastEventAt,
       runner: entry.runner,
       skill: entry.skill,
       model: entry.model,
       provider: entry.provider,
+      promptSha256: entry.promptSha256,
+      promptBytes: entry.promptBytes,
+      modelSha256: entry.modelSha256,
+      resourceConfigSha256: entry.resourceConfigSha256,
       sessionId: entry.sessionId,
       resourceGroup: entry.resourceGroup,
       error: entry.error,

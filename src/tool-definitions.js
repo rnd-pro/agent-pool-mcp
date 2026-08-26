@@ -565,6 +565,7 @@ export function getToolDefinitions(ctx = {}) {
         allowed_tools: { type: 'array', items: { type: 'string' }, description: 'Provider tool allowlist for compatible runners. For Claude, entries are passed to --allowedTools.' },
         rotation_mode: { type: 'string', enum: ['error_fallback', 'round_robin'], description: 'Profile rotation strategy. Default: error_fallback.' },
         model_tier: { type: 'string', description: 'Logical tier label for UI/docs, e.g. fast, standard, advanced.' },
+        opencode_catalog_override: { type: 'boolean', description: 'Explicitly declare the selected model in the process-local OpenCode catalog. Use only for an exact provider/model route owned by this group.' },
         cwd: { type: 'string', description: 'Project directory. Defaults to current working directory.' },
         json: { type: 'boolean', description: 'Return pure JSON string instead of Markdown format.' },
       },

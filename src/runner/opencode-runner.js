@@ -11,6 +11,15 @@ import { createOpenCodeEnv, cleanupTmpConfig, createProviderRuntimeEnv } from '.
 import { resolvePortalUrl } from './url-resolver.js';
 import { TASK_SECRET_ENV } from './task-secret-store.js';
 
+function extractEventErrorMessage(ev) {
+  if (typeof ev?.error === 'string' && ev.error.trim()) return ev.error;
+  return ev?.error?.data?.message
+    ?? ev?.error?.message
+    ?? ev?.message
+    ?? ev?.error?.name
+    ?? 'OpenCode execution error';
+}
+
 function normalizeEvent(ev) {
   switch (ev.type) {
     case 'text':
@@ -60,8 +69,8 @@ function normalizeEvent(ev) {
     case 'error':
       return {
         type: 'error',
-        message: ev.error?.message ?? ev.message ?? JSON.stringify(ev.error),
-        error: ev.error?.message ?? ev.message ?? JSON.stringify(ev.error),
+        message: extractEventErrorMessage(ev),
+        error: extractEventErrorMessage(ev),
       };
 
     case 'step_start':
@@ -128,7 +137,10 @@ async function runOpencodeStreamingInternal({ prompt, cwd, model, timeout, sessi
     let envOverrides = {};
     let hubTmpDir = null;
     if (portalUrl) {
-      let hub = createOpenCodeEnv(portalUrl, taskSecret);
+      let hub = createOpenCodeEnv(portalUrl, taskSecret, {
+        model,
+        modelCatalogOverride: groupConfig?.opencode_catalog_override === true,
+      });
       hubTmpDir = hub.tmpDir;
       envOverrides = hub.envOverrides;
     }
@@ -388,5 +400,5 @@ function extractStats(events) {
 function extractErrors(events) {
   return events
     .filter(e => e.type === 'error')
-    .map(e => e.error?.message ?? e.message ?? JSON.stringify(e.error ?? e));
+    .map(extractEventErrorMessage);
 }

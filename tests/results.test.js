@@ -27,6 +27,7 @@ describe('task results', () => {
     removeTask('missing-prompt-task');
     removeTask('running-format-task');
     removeTask('retained-result-task');
+    removeTask('terminal-elapsed-task');
     removeTask('soft-timeout-task');
     removeTask('finish-parent-task');
     removeTask('finish-child-task');
@@ -113,6 +114,18 @@ describe('task results', () => {
     assert.equal(task.chatId, 'chat-1');
     assert.equal(task.resourceGroup, 'review');
     assert.equal(task.sessionId, 'session-2');
+  });
+
+  it('freezes elapsed time when a task reaches a terminal state', async () => {
+    createTask('terminal-elapsed-task', 'timed prompt', null, 'plan', TEST_CWD);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    completeTask('terminal-elapsed-task', { exitCode: 0, response: 'done' });
+
+    let first = listTaskState().tasks.find(task => task.id === 'terminal-elapsed-task').elapsedMs;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    let second = listTaskState().tasks.find(task => task.id === 'terminal-elapsed-task').elapsedMs;
+
+    assert.equal(second, first);
   });
 
   it('updates soft-timeout tasks with final results and refreshes metadata', () => {

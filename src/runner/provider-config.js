@@ -89,9 +89,12 @@ export function createProviderRuntimeEnv(baseEnv = process.env) {
  *
  * @param {string} portalUrl - Portal MCP URL
  * @param {string} [taskSecret] - Per-task secret for verified identity
+ * @param {object} [options]
+ * @param {string} [options.model] - Exact OpenCode provider/model identifier
+ * @param {boolean} [options.modelCatalogOverride=false] - Declare the exact model in the process-local OpenCode catalog
  * @returns {{ envOverrides: object, tmpDir: string }}
  */
-export function createOpenCodeEnv(portalUrl, taskSecret) {
+export function createOpenCodeEnv(portalUrl, taskSecret, options = {}) {
   let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-hub-'));
   let configPath = path.join(tmpDir, 'opencode.json');
   let config = {
@@ -106,6 +109,26 @@ export function createOpenCodeEnv(portalUrl, taskSecret) {
       },
     },
   };
+
+  if (options.modelCatalogOverride === true) {
+    let model = typeof options.model === 'string' ? options.model.trim() : '';
+    let separator = model.indexOf('/');
+    let providerId = separator > 0 ? model.slice(0, separator) : '';
+    let providerModelId = separator > 0 ? model.slice(separator + 1) : '';
+    let validProvider = /^[a-z0-9][a-z0-9_-]*$/i.test(providerId);
+    let validModel = /^[a-z0-9][a-z0-9._:/-]*$/i.test(providerModelId);
+    if (!validProvider || !validModel) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      throw new Error(`Invalid OpenCode model catalog override: ${model || '(empty)'}`);
+    }
+    config.provider = {
+      [providerId]: {
+        models: {
+          [providerModelId]: { name: providerModelId },
+        },
+      },
+    };
+  }
 
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 

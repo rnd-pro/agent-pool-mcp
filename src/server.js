@@ -13,7 +13,7 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { runAntigravityStreaming, listAntigravitySessions } from './runner/antigravity-runner.js';
 import { runOpencodeStreaming } from './runner/opencode-runner.js';
@@ -41,12 +41,12 @@ import { handleResolveContext } from './tools/context-resolver.js';
 import { buildResolvedContextPackage } from './tools/context-package.js';
 import { buildDelegatePrompt } from './tools/delegate-prompt.js';
 import { createToolRouter } from './tools/toolRouter.js';
+import { getGlobalConfigPath } from './runtime/paths.js';
 
 import { getToolDefinitions } from './tool-definitions.js';
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, execFile } from 'node:child_process';
 
@@ -67,6 +67,18 @@ function diagnosticLine(value, limit = 500) {
   return typeof value === 'string'
     ? value.replace(/\s+/g, ' ').trim().replaceAll('`', '\\`').substring(0, limit)
     : '';
+}
+
+function sha256(value) {
+  return createHash('sha256').update(String(value ?? '')).digest('hex');
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function normalizeFileHints(files) {
@@ -179,7 +191,7 @@ function discoverModels() {
   return new Promise((resolve) => {
     // 1. Try user config first
     try {
-      let configPath = path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
+      let configPath = getGlobalConfigPath('agent-portal.json');
       if (fs.existsSync(configPath)) {
         let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         let userModels = config.providerModels?.opencode;
@@ -370,6 +382,12 @@ function resultFailureReason(result) {
     return `exit code ${result.exitCode}`;
   }
   return 'provider attempt failed';
+}
+
+function isUnknownOpenCodeModel(provider, effectiveModel, knownIds) {
+  return provider === 'opencode' && effectiveModel
+    && effectiveModel !== 'default'
+    && !knownIds.includes(effectiveModel);
 }
 
 const PROVIDER_REASONING_EFFORTS = {
@@ -964,6 +982,36 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   // Route to the correct runner based on provider
   const provider = args.provider || resourceProfile.provider || resourceGroup?.provider || agentDef?.provider || DEFAULT_PROVIDER;
 
+  const runtimeProfiles = buildRuntimeFallbackProfiles(args, resourceGroup, resourceProfile);
+  if (_cachedModels.length > 0) {
+    const knownIds = _cachedModels
+      .map(model => typeof model === 'string' ? model : model?.id)
+      .filter(Boolean);
+    const unknownProfile = runtimeProfiles
+      .map(profile => resolveRunProfile(profile, resourceGroup, agentDef))
+      .find(profile => isUnknownOpenCodeModel(profile.provider, profile.model, knownIds));
+
+    if (unknownProfile) {
+      if (ledgerAdmissionId) {
+        try {
+          await getSlotLedger().release({ admissionId: ledgerAdmissionId });
+        } catch {
+          // A stale reserved slot is swept by the ledger TTL. The task still fails closed.
+        }
+      }
+      const sample = knownIds.slice(0, 15).join('\n  - ');
+      const suffix = knownIds.length > 15 ? `\n  ... and ${knownIds.length - 15} more` : '';
+      console.error(`[agent-pool] Unknown OpenCode model "${unknownProfile.model}", refusing default fallback`);
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Unknown OpenCode model: "${unknownProfile.model}". Execution was not started; explicit model selections never fall back to the provider default.\n\nAvailable models:\n  - ${sample}${suffix}`,
+        }],
+        isError: true,
+      };
+    }
+  }
+
   // Per-task secret → verified-slug correlation (D2.1). Mint a secret bound to
   // the server-verified slug — the `verified_slug` the parent passed, falling
   // back to the slug agent-pool resolved — and inject it into the spawned
@@ -1017,47 +1065,21 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
     chat_id: args.chat_id,
   };
 
-  const runtimeProfiles = buildRuntimeFallbackProfiles(args, resourceGroup, resourceProfile);
   const hasRuntimeFallback = runtimeProfiles.length > 1;
   let providerError = providerRequirementError(provider);
   if (providerError && !hasRuntimeFallback) return providerError;
 
-  // ── Model validation ──────────────────────────────────────
-  // Catch model typos before spawning a CLI process.
-  // Instead of blocking, fall back to default and warn with available models.
-  let modelWarning = '';
-  const effectiveModel = taskOpts.model;
-  if (provider === 'opencode' && effectiveModel && _cachedModels.length > 0) {
-    const knownIds = _cachedModels.map(m => typeof m === 'string' ? m : m.id);
-    const isKnown = knownIds.some(id => id === effectiveModel);
-    if (!isKnown) {
-      // Collect preferred models from resource groups
-      let preferredSection = '';
-      try {
-        const groups = listGroups(cwd);
-        const preferredModels = new Set();
-        for (const g of groups) {
-          if (g.model) preferredModels.add(`${g.model}  (group: ${g.name})`);
-          if (Array.isArray(g.profiles)) {
-            for (const p of g.profiles) {
-              if (p.model) preferredModels.add(`${p.model}  (group: ${g.name}, provider: ${p.provider || g.provider || 'default'})`);
-            }
-          }
-        }
-        if (preferredModels.size > 0) {
-          preferredSection = `\n⭐ **Preferred models** (from resource groups):\n  - ${[...preferredModels].join('\n  - ')}\n`;
-        }
-      } catch { /* groups may not exist */ }
-
-      const sample = knownIds.slice(0, 15).join('\n  - ');
-      const suffix = knownIds.length > 15 ? `\n  ... and ${knownIds.length - 15} more` : '';
-
-      modelWarning = `\n\n⚠️ **Unknown model**: "${effectiveModel}" — running on **default** model instead.\n${preferredSection}\nAvailable models:\n  - ${sample}${suffix}\n\nNext time leave \`model\` empty or use an exact ID from the list above.`;
-
-      console.error(`[agent-pool] Unknown model "${effectiveModel}", falling back to default`);
-      taskOpts.model = null;
-    }
-  }
+  const executionConfig = {
+    resourceGroup: resourceGroupName,
+    group: resourceGroup,
+    runtimeProfiles,
+    provider,
+    model: taskOpts.model ?? null,
+    approvalMode: resolvedMode,
+    timeout,
+    policy: policyPath,
+    contextMode,
+  };
 
   createTask(taskId, args.prompt, args.on_wait_hint, resolvedMode, cwd,
     agentDef?.slug ?? args.agent_slug ?? 'unknown',
@@ -1075,6 +1097,10 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
       files: fileHints,
       sessionId: args.session_id ?? null,
       admissionId: ledgerAdmissionId,
+      promptSha256: sha256(prompt),
+      promptBytes: Buffer.byteLength(prompt, 'utf8'),
+      modelSha256: sha256(taskOpts.model ?? ''),
+      resourceConfigSha256: sha256(stableJson(executionConfig)),
     }
   );
 
@@ -1126,7 +1152,13 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   }
 
   runWithProfileFallback()
-    .then((result) => completeTask(taskId, result))
+    .then((result) => {
+      if (isFailedRunResult(result)) {
+        failTask(taskId, resultFailureReason(result), result);
+        return;
+      }
+      completeTask(taskId, result);
+    })
     .catch((err) => failTask(taskId, err.message));
 
   const mode = resolvedMode;
@@ -1141,7 +1173,7 @@ async function handleDelegate(args = {}, { approvalMode, emoji, label }) {
   return {
     content: [{
       type: 'text',
-      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${preview(args.prompt, 100)}...${loadInfo}${modelWarning}\n\nUse \`get_task_result\` with this task_id to check status.`,
+      text: `${emoji} ${label}\n\n- **Task ID**: \`${taskId}\`\n- **Mode**: ${mode}${runnerInfo}${skillInfo}${policyInfo}\n- **Prompt**: ${preview(args.prompt, 100)}...${loadInfo}\n\nUse \`get_task_result\` with this task_id to check status.`,
     }],
   };
 }
@@ -1729,6 +1761,7 @@ function handleCreateGroup(args) {
     allowed_tools: args.allowed_tools || args.allowedTools,
     rotation_mode: args.rotation_mode,
     model_tier: args.model_tier,
+    opencode_catalog_override: args.opencode_catalog_override,
   });
 
   const configParts = [];
@@ -1741,6 +1774,7 @@ function handleCreateGroup(args) {
   if (args.approval_mode) configParts.push(`approval: ${args.approval_mode}`);
   if (args.max_agents) configParts.push(`max: ${args.max_agents}`);
   if (args.timeout) configParts.push(`timeout: ${args.timeout}s`);
+  if (args.opencode_catalog_override === true) configParts.push('OpenCode catalog override: enabled');
 
   return {
     content: [{
